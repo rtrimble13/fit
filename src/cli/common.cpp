@@ -1,5 +1,6 @@
 #include "commands.hpp"
 #include "fit/core/error.hpp"
+#include "fit/curve/curve_set.hpp"
 #include "fit/io/csv.hpp"
 
 namespace fit::cli {
@@ -9,11 +10,11 @@ std::vector<OptionSpec> operator+(std::vector<OptionSpec> a, const std::vector<O
     return a;
 }
 
-std::vector<OptionSpec> curve_options(bool required) {
-    return {
+std::vector<OptionSpec> curve_options(bool required, bool select) {
+    std::vector<OptionSpec> options{
         {"curve", "FILE",
          std::string("market quotes CSV (columns: type,tenor,rate)") +
-             (required ? "; or --discount-curve with --projection-curve" : ""),
+             (required ? "; or --discount-curve with --projection-curve, or --curve-set" : ""),
          "", false},
         {"discount-curve", "FILE",
          "quotes CSV of the discount (OIS) curve, with --projection-curve", "", false},
@@ -21,6 +22,18 @@ std::vector<OptionSpec> curve_options(bool required) {
          "quotes CSV of a projection curve, bootstrapped on --discount-curve; bonds still "
          "discount on --discount-curve",
          "", false},
+        {"curve-set", "FILE",
+         "curve-set CSV (columns: name,quotes,discount,...) naming any number of curves", "",
+         false},
+    };
+    if (select) {
+        options.push_back({"curve-name", "NAME",
+                           "the curve to use: a name from --curve-set (default: its only curve), "
+                           "or discount | projection with the pair (default: projection); bonds "
+                           "discount on that curve's discount curve",
+                           "", false});
+    }
+    std::vector<OptionSpec> rest{
         {"asof", "DATE", "curve / valuation date (YYYY-MM-DD)", "", required},
         {"interp", "METHOD",
          "linear-zero | flat-forward | cubic-zero | monotone-cubic | monotone-convex",
@@ -33,6 +46,8 @@ std::vector<OptionSpec> curve_options(bool required) {
         {"holidays", "FILE", "extra holidays, one ISO date per line", "", false},
         {"spot-lag", "DAYS", "business days from as-of to quote start dates", "0", false},
     };
+    options.insert(options.end(), rest.begin(), rest.end());
+    return options;
 }
 
 std::vector<OptionSpec> bond_options() {
@@ -72,62 +87,100 @@ Calendar load_calendar(const Args& args) {
 namespace {
 
 bool has_curve_source(const Args& args) {
-    return args.has("curve") || args.has("discount-curve") || args.has("projection-curve");
+    return args.has("curve") || args.has("discount-curve") || args.has("projection-curve") ||
+           args.has("curve-set");
+}
+
+std::string curve_names(const std::vector<NamedCurve>& curves) {
+    std::string out;
+    for (const NamedCurve& c : curves) {
+        out += (out.empty() ? "" : ", ") + c.name;
+    }
+    return out;
 }
 
 } // namespace
 
-Market load_market(const Args& args) {
-    const bool dual = args.has("discount-curve") || args.has("projection-curve");
-    if (args.has("curve") && dual) {
-        throw UsageError("give --curve, or --discount-curve with --projection-curve, not both");
+Market load_market(const Args& args, bool select) {
+    const bool pair = args.has("discount-curve") || args.has("projection-curve");
+    const bool set = args.has("curve-set");
+    if (static_cast<int>(args.has("curve")) + static_cast<int>(pair) + static_cast<int>(set) > 1) {
+        throw UsageError("give one of --curve, --discount-curve with --projection-curve, or "
+                         "--curve-set");
     }
-    if (dual && !args.has("projection-curve")) {
+    if (pair && !args.has("projection-curve")) {
         throw UsageError("--discount-curve requires --projection-curve");
     }
-    if (dual && !args.has("discount-curve")) {
+    if (pair && !args.has("discount-curve")) {
         throw UsageError("--projection-curve requires --discount-curve");
     }
-    if (!dual && !args.has("curve")) {
-        throw UsageError(
-            "missing required option '--curve' (or --discount-curve with --projection-curve)");
+    if (!has_curve_source(args)) {
+        throw UsageError("missing required option '--curve' (or --discount-curve with "
+                         "--projection-curve, or --curve-set)");
     }
 
     Market m;
     m.as_of = Date::parse(args.require("asof"));
     m.calendar = load_calendar(args);
-    QuoteConventions conventions;
-    conventions.calendar = m.calendar;
-    conventions.settle_days = parse_int(args.require("spot-lag"), "--spot-lag");
-    require(conventions.settle_days >= 0, "--spot-lag must be non-negative");
-    BootstrapOptions options;
-    options.method = parse_interpolation_method(args.require("interp"));
+    CurveSetDefaults defaults;
+    defaults.calendar = m.calendar;
+    defaults.settle_days = parse_int(args.require("spot-lag"), "--spot-lag");
+    require(defaults.settle_days >= 0, "--spot-lag must be non-negative");
+    defaults.method = parse_interpolation_method(args.require("interp"));
     if (const auto extrapolation = args.get("extrapolation")) {
-        options.extrapolation = parse_extrapolation(*extrapolation);
+        defaults.extrapolation = parse_extrapolation(*extrapolation);
     }
-    // Builds one curve, discounted on `discount` (empty: on itself); errors name the curve.
-    const auto build = [&](const std::string& role, const std::string& path, CurvePtr discount) {
-        try {
-            BootstrapOptions curve_options = options;
-            curve_options.discount = std::move(discount);
-            return bootstrap(m.as_of, load_quotes(path, m.as_of, conventions), m.calendar,
-                             curve_options);
-        } catch (const Error& e) {
-            throw Error(dual ? role + " curve: " + e.what() : e.what());
-        }
+    // A curve from a quotes file under the command-line conventions.
+    const auto spec = [&](std::string name, const std::string& path, std::string discount) {
+        QuoteConventions conventions;
+        conventions.calendar = defaults.calendar;
+        conventions.settle_days = defaults.settle_days;
+        CurveSpec s;
+        s.name = std::move(name);
+        s.quotes = load_quotes(path, m.as_of, conventions);
+        s.discount = std::move(discount);
+        s.calendar = defaults.calendar;
+        s.options.method = defaults.method;
+        s.options.extrapolation = defaults.extrapolation;
+        return s;
     };
-    if (!dual) {
-        m.curves.push_back({"curve", "curve", build("", args.require("curve"), nullptr)});
-        m.curve = m.discount = m.curves.back().bootstrap.curve;
+    std::vector<CurveSpec> specs;
+    std::string selected;
+    if (set) {
+        specs = load_curve_set(args.require("curve-set"), m.as_of, defaults);
+        selected = specs.size() == 1 ? specs.front().name : "";
+    } else if (pair) {
+        specs.push_back(spec("discount", args.require("discount-curve"), ""));
+        specs.push_back(spec("projection", args.require("projection-curve"), "discount"));
+        selected = "projection";
+    } else {
+        specs.push_back(spec("curve", args.require("curve"), ""));
+        selected = "curve";
+    }
+    m.multi_curve = set || pair;
+    m.curves = build_curve_set(m.as_of, specs);
+    if (!select) {
         return m;
     }
-    m.multi_curve = true;
-    m.curves.push_back(
-        {"discount", "discount", build("discount", args.require("discount-curve"), nullptr)});
-    m.discount = m.curves.back().bootstrap.curve;
-    m.curves.push_back({"projection", "discount",
-                        build("projection", args.require("projection-curve"), m.discount)});
-    m.curve = m.curves.back().bootstrap.curve;
+
+    if (const auto name = args.get("curve-name")) {
+        selected = *name;
+    }
+    if (selected.empty()) {
+        throw UsageError("--curve-name is required: the curve set has several curves (" +
+                         curve_names(m.curves) + ")");
+    }
+    const auto find = [&](const std::string& name) -> const NamedCurve& {
+        for (const NamedCurve& c : m.curves) {
+            if (c.name == name) {
+                return c;
+            }
+        }
+        throw Error("unknown curve '" + name + "' (curves: " + curve_names(m.curves) + ")");
+    };
+    const NamedCurve& chosen = find(selected);
+    m.curve = chosen.bootstrap.curve;
+    m.discount = find(chosen.discount_name).bootstrap.curve;
     return m;
 }
 

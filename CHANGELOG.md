@@ -37,6 +37,11 @@ with the reason and the size of the effect.
   build` reports both curves (`curves`, `market` and `nodes` tables). Bonds discount on the
   discount curve. Validated against QuantLib 1.44's dual-curve `SwapRateHelper` bootstrap to
   2e-12. See [ADR 0016](docs/adr/0016-multi-curve-construction.md).
+- Curve sets. `--curve-set FILE` builds any number of named curves from a CSV of
+  `name,quotes[,discount,interp,extrapolation,calendar,spot_lag]`, each after the curve that
+  discounts it. `--curve-name NAME` selects the curve a command uses, with `discount` or
+  `projection` for the pair. Bonds discount on the selected curve's discount curve. Example
+  `examples/data/usd_curves.csv`. See [ADR 0017](docs/adr/0017-curve-sets.md).
 - `irs` quote type: a fixed vs term-rate swap, by default annual ACT/360 fixed against
   quarterly floating periods. The new `float_frequency` column sets the floating periods.
 - Example projection curve `examples/data/usd_term_sofr_3m.csv`.

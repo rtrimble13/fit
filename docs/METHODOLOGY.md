@@ -213,6 +213,10 @@ Floating coupons are par coupons: each pays the forward of `P` over its own accr
 the floating day count cancels. When `P` and `D` are the same curve the floating legs telescope
 to `D(S) - D(P_n)` and the single-curve formulas above result.
 
+A curve set ([ADR 0017](adr/0017-curve-sets.md)) builds each of its curves after the curve that
+discounts it. A bond priced against any curve of a market is discounted on that curve's discount
+curve.
+
 ## 5. Bonds
 
 A bond pays `100 c tau_i` at the end of each period, where `tau_i` is the year fraction of

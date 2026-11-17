@@ -37,13 +37,14 @@ void node_columns(Table& nodes) {
 void multi_curve_build(const Market& m, Report& report) {
     Table& curves = report.add(Table("curves"));
     curves.column("curve").column("discount_curve").column("interpolation");
-    curves.column("extrapolation").column("nodes", 0).column("bootstrap_passes", 0);
-    curves.column("max_repricing_error_bp", 8);
+    curves.column("extrapolation").column("calendar").column("nodes", 0);
+    curves.column("bootstrap_passes", 0).column("max_repricing_error_bp", 8);
     for (const NamedCurve& c : m.curves) {
         const BootstrapResult& b = c.bootstrap;
         curves.row({c.name, c.discount_name, to_string(b.curve->method()),
-                    to_string(b.curve->extrapolation()), static_cast<double>(b.quotes.size()),
-                    static_cast<double>(b.passes), b.max_error * 1e4});
+                    to_string(b.curve->extrapolation()), c.calendar.name(),
+                    static_cast<double>(b.quotes.size()), static_cast<double>(b.passes),
+                    b.max_error * 1e4});
     }
     Table& summary = report.add(Table::key_value("market"));
     summary.add("as_of", m.as_of.to_string());
@@ -57,7 +58,7 @@ void multi_curve_build(const Market& m, Report& report) {
 }
 
 void curve_build(const Args& args, Report& report) {
-    const Market m = load_market(args);
+    const Market m = load_market(args, false);
     if (m.multi_curve) {
         multi_curve_build(m, report);
         return;
@@ -137,8 +138,8 @@ std::vector<Command> curve_commands() {
     const std::string example_curve = "--curve examples/data/usd_treasury.csv --asof 2026-11-17";
     return {
         {"curve", "build", "Bootstrap a zero curve from market quotes and show its nodes",
-         curve_options(true), "fit curve build " + example_curve + " --interp monotone-cubic",
-         curve_build},
+         curve_options(true, false),
+         "fit curve build " + example_curve + " --interp monotone-cubic", curve_build},
         {"curve", "query",
          "Interpolate zero, par and forward rates and discount factors at tenors or dates",
          curve_options(true) +

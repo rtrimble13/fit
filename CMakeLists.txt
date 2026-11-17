@@ -34,6 +34,7 @@ add_library(fit_core STATIC
   src/math/interpolation.cpp
   src/curve/yield_curve.cpp
   src/curve/bootstrap.cpp
+  src/curve/curve_set.cpp
   src/bond/bond.cpp
   src/bond/analytics.cpp
   src/bond/horizon.cpp

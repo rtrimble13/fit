@@ -51,16 +51,15 @@ curve, then the projection curve on it, from the same `--asof`, `--interp`,
 `--extrapolation`, `--calendar`, `--holidays` and `--spot-lag`.
 
 - `fit curve query` and `fit curve forwards` report the projection curve.
-- `fit curve build` reports both curves. It shows a `curves` table with one row per curve
-  (`curve`, `discount_curve`, interpolation, extrapolation, nodes, passes, repricing error),
-  a `market` table (as-of date and calendar), and one `nodes` table whose first column names
-  the curve. The curves are named `discount` and `projection`.
+- `fit curve build` reports both curves. It shows a `curves` table with one row per curve, a
+  `market` table, and one `nodes` table whose first column names the curve. The curves are
+  named `discount` and `projection` (layout in [ADR 0017](0017-curve-sets.md)).
 - Bond, portfolio and pre-trade commands discount every bond on the discount curve. Fixed-rate
   bonds have no use for a projection curve.
 
 `--curve` keeps its meaning and output. It cannot be combined with the pair, and each option of
 the pair requires the other. A curve-set file naming any number of curves is the subject of a
-separate decision.
+separate decision ([ADR 0017](0017-curve-sets.md)).
 
 ## Consequences
 

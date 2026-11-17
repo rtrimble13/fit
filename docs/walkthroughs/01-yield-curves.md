@@ -406,10 +406,10 @@ irs,30Y,4.10
 $ fit curve build --discount-curve examples/data/usd_sofr.csv --projection-curve examples/data/usd_term_sofr_3m.csv --asof 2026-11-17 --spot-lag 2 --calendar us
 curves
 ======
-curve       discount_curve  interpolation  extrapolation  nodes  bootstrap_passes  max_repricing_error_bp
-----------  --------------  -------------  -------------  -----  ----------------  ----------------------
-discount    discount        flat-forward   flat-forward      13                 1              0.00000000
-projection  discount        flat-forward   flat-forward      10                 1              0.00000000
+curve       discount_curve  interpolation  extrapolation  calendar  nodes  bootstrap_passes  max_repricing_error_bp
+----------  --------------  -------------  -------------  --------  -----  ----------------  ----------------------
+discount    discount        flat-forward   flat-forward   us           13                 1              0.00000000
+projection  discount        flat-forward   flat-forward   us           10                 1              0.00000000
 
 market
 ======
@@ -472,6 +472,59 @@ the same price as on `usd_sofr.csv` alone (`clean_price,102.463656476`). The
 projection curve will matter to floating-rate notes. The pricing formulas are in
 [METHODOLOGY.md](../METHODOLOGY.md#4-bootstrapping) and the design in
 [ADR 0016](../adr/0016-multi-curve-construction.md).
+
+### Curve sets
+
+The pair is a shorthand for a two-curve market whose curves are named `discount` and
+`projection`. A curve-set file names any number of curves. Each row gives a curve's quotes file
+and the curve that discounts it, and may override the command line's conventions for that curve:
+
+```console
+$ cat examples/data/usd_curves.csv
+# Illustrative USD curve set as of 2026-11-17: each row names a curve, its quotes file (relative
+# to this file) and the curve that discounts it (empty: itself). Optional columns interp,
+# extrapolation, calendar and spot_lag override the command line for that curve.
+name,quotes,discount,calendar,spot_lag
+sofr,usd_sofr.csv,,us,2
+term-sofr-3m,usd_term_sofr_3m.csv,sofr,us,2
+treasury,usd_treasury.csv,,weekends,0
+```
+
+`fit curve build` builds and reports every curve. Each curve is built after the curve that
+discounts it, whatever the row order:
+
+```console
+$ fit curve build --curve-set examples/data/usd_curves.csv --asof 2026-11-17 | head -12
+curves
+======
+curve         discount_curve  interpolation  extrapolation  calendar  nodes  bootstrap_passes  max_repricing_error_bp
+------------  --------------  -------------  -------------  --------  -----  ----------------  ----------------------
+sofr          sofr            flat-forward   flat-forward   us           13                 1              0.00000000
+term-sofr-3m  sofr            flat-forward   flat-forward   us           10                 1              0.00000000
+treasury      treasury        flat-forward   flat-forward   weekends     11                 1              0.00000000
+
+market
+======
+as_of     2026-11-17
+calendar    weekends
+```
+
+Every other command works with one curve, chosen with `--curve-name`. That option is required
+when a set has more than one curve, and with the pair it defaults to `projection`. Bonds are
+discounted on the chosen curve's discount curve. Priced against the 3M curve, a bond is
+therefore priced on SOFR:
+
+```console
+$ for c in sofr term-sofr-3m treasury; do echo "--- $c"; fit bond price --maturity 2036-11-15 --coupon 4.25 --curve-set examples/data/usd_curves.csv --asof 2026-11-17 --curve-name $c --format csv | grep -E '^clean_price,'; done
+--- sofr
+clean_price,102.463656476
+--- term-sofr-3m
+clean_price,102.463656476
+--- treasury
+clean_price,99.9846191584
+```
+
+The file format and selection rules are in [ADR 0017](../adr/0017-curve-sets.md).
 
 ## 9. Machine-readable output
 

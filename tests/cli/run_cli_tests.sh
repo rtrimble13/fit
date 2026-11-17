@@ -103,8 +103,8 @@ expect_out '^1W +deposit +2026-11-27 '     # T+2 start, rolled over Thanksgiving
 SOFR=(--asof 2026-11-17 --spot-lag 2 --calendar us)
 DUAL=(--discount-curve "$DATA/usd_sofr.csv" --projection-curve "$DATA/usd_term_sofr_3m.csv" "${SOFR[@]}")
 expect_exit 0 curve build "${DUAL[@]}"
-expect_out '^discount +discount +flat-forward +flat-forward +13 +1 +0\.00000000$'
-expect_out '^projection +discount +flat-forward +flat-forward +10 '
+expect_out '^discount +discount +flat-forward +flat-forward +us +13 +1 +0\.00000000$'
+expect_out '^projection +discount +flat-forward +flat-forward +us +10 '
 expect_out '^projection +10Y +irs +2036-11-19 .* 4\.0100 .* 0\.000000$'
 expect_out '^discount +2Y +swap +2028-11-20 '
 expect_exit 0 curve build "${DUAL[@]}" --format json
@@ -117,15 +117,54 @@ DUAL_PRICE="$(grep '^clean_price,' "$OUT")"
 expect_exit 0 bond price "${BOND[@]}" --curve "$DATA/usd_sofr.csv" "${SOFR[@]}" --format csv
 [ "$DUAL_PRICE" = "$(grep '^clean_price,' "$OUT")" ] || fail "bond on dual curves: $DUAL_PRICE"
 expect_exit 2 curve build "${CURVE[@]}" --discount-curve "$DATA/usd_sofr.csv"
-expect_err 'give --curve, or --discount-curve with --projection-curve, not both'; expect_no_out
+expect_err 'give one of --curve, --discount-curve with --projection-curve, or --curve-set'; expect_no_out
 expect_exit 2 curve build --discount-curve "$DATA/usd_sofr.csv" "${SOFR[@]}"
 expect_err '--discount-curve requires --projection-curve'
 expect_exit 2 curve build --projection-curve "$DATA/usd_term_sofr_3m.csv" "${SOFR[@]}"
 expect_err '--projection-curve requires --discount-curve'
 expect_exit 2 curve build --asof 2026-11-17
-expect_err "missing required option '--curve' \(or --discount-curve with --projection-curve\)"
+expect_err "missing required option '--curve' \(or --discount-curve with --projection-curve, or --curve-set\)"
 expect_exit 1 curve build --discount-curve "$DATA/usd_sofr.csv" --projection-curve "$DATA/usd_treasury.csv" "${SOFR[@]}"
-expect_err "^fit: error: projection curve: quote '1Y': a par bond quote prices on the curve itself"
+expect_err "^fit: error: curve 'projection': quote '1Y': a par bond quote prices on the curve itself"
+expect_exit 0 curve query "${DUAL[@]}" --curve-name discount --tenors 2Y --format csv
+expect_out '^2Y,2028-11-17,[^,]*,3\.720'        # the OIS curve's 2Y zero (projection: 3.790)
+
+# ---- curve sets: any number of named curves -----------------------------------------------
+SET=(--curve-set "$DATA/usd_curves.csv" --asof 2026-11-17)
+expect_exit 0 curve build "${SET[@]}"
+expect_out '^sofr +sofr +flat-forward +flat-forward +us +13 +1 +0\.00000000$'
+expect_out '^term-sofr-3m +sofr +flat-forward +flat-forward +us +10 '
+expect_out '^treasury +treasury +flat-forward +flat-forward +weekends +11 +1 '
+expect_out '^treasury +10Y +par +2036-11-17 +10\.0082 +4\.2500 +4\.2417 +0\.654084 '
+expect_exit 2 curve query "${SET[@]}"
+expect_err "--curve-name is required: the curve set has several curves \(sofr, term-sofr-3m, treasury\)"
+expect_exit 1 curve query "${SET[@]}" --curve-name libor
+expect_err "unknown curve 'libor' \(curves: sofr, term-sofr-3m, treasury\)"; expect_no_out
+expect_exit 0 curve forwards "${SET[@]}" --curve-name term-sofr-3m --tenor 1Y --end 2Y --format csv
+expect_out '^2026-11-17,2027-11-17,0,4\.024'      # as from the pair: the same projection curve
+# A bond on a projection curve of the set discounts on that curve's discount curve (sofr), and
+# on the treasury curve like --curve usd_treasury.csv.
+expect_exit 0 bond price "${BOND[@]}" "${SET[@]}" --curve-name term-sofr-3m --format csv
+[ "$DUAL_PRICE" = "$(grep '^clean_price,' "$OUT")" ] || fail "bond on curve set: $(grep clean_price "$OUT")"
+expect_exit 0 bond price "${BOND[@]}" "${SET[@]}" --curve-name treasury --format csv
+SET_TSY="$(grep '^clean_price,' "$OUT")"
+expect_exit 0 bond price "${BOND[@]}" "${CURVE[@]}" --format csv
+[ "$SET_TSY" = "$(grep '^clean_price,' "$OUT")" ] || fail "treasury in curve set: $SET_TSY"
+expect_exit 2 curve build "${SET[@]}" --curve "$DATA/usd_treasury.csv"
+expect_err 'give one of --curve, --discount-curve with --projection-curve, or --curve-set'
+expect_exit 2 curve build "${SET[@]}" --curve-name sofr
+expect_err "unknown option '--curve-name'"        # build reports every curve
+BAD="$(mktemp)"
+printf 'name,quotes,discount\na,%s/usd_sofr.csv,b\nb,%s/usd_sofr.csv,a\n' "$PWD/$DATA" "$PWD/$DATA" >"$BAD"
+expect_exit 1 curve build --curve-set "$BAD" --asof 2026-11-17
+expect_err 'curve set: curves a, b are discounted on each other in a cycle'
+printf 'name,quotes,discount\na,%s/usd_sofr.csv,ois\n' "$PWD/$DATA" >"$BAD"
+expect_exit 1 curve build --curve-set "$BAD" --asof 2026-11-17
+expect_err "curve set: curve 'a' is discounted on unknown curve 'ois' \(curves: a\)"
+printf 'name,quotes,discunt\na,%s/usd_sofr.csv,\n' "$PWD/$DATA" >"$BAD"
+expect_exit 1 curve build --curve-set "$BAD" --asof 2026-11-17
+expect_err 'discunt'
+rm -f "$BAD"
 
 # ---- bond ---------------------------------------------------------------------------------
 # Published Excel PRICE() example.

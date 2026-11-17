@@ -227,7 +227,7 @@ Option groups shared across commands:
 
 | Group | Options |
 |-------|---------|
-| Curve | `--curve FILE`, or `--discount-curve FILE --projection-curve FILE`; `--asof DATE` `--interp flat-forward\|linear-zero\|cubic-zero\|monotone-cubic\|monotone-convex` `--extrapolation flat-forward\|flat-zero` `--calendar none\|weekends\|us` `--holidays FILE` `--spot-lag DAYS` |
+| Curve | `--curve FILE`, or `--discount-curve FILE --projection-curve FILE`, or `--curve-set FILE`; `--curve-name NAME` (not on `curve build`); `--asof DATE` `--interp flat-forward\|linear-zero\|cubic-zero\|monotone-cubic\|monotone-convex` `--extrapolation flat-forward\|flat-zero` `--calendar none\|weekends\|us` `--holidays FILE` `--spot-lag DAYS` |
 | Bond | `--maturity DATE` `--coupon PCT` `--frequency 1\|2\|4\|12` `--daycount DC` `--issue DATE` `--settle DATE` `--settle-days N` `--no-eom` |
 | Mark | one of `--price PX` (clean), `--yield PCT`, `--zspread BP`; none means "on the curve, no spread" |
 | Risk | `--key-tenors LIST` `--bump-bp BP` |
@@ -262,6 +262,26 @@ par,10Y,4.25
 With `--discount-curve` and `--projection-curve`, the projection file's swaps are priced with
 floating legs on the projection curve and all cash flows discounted on the discount curve.
 `par` quotes are not allowed there. Bonds are always discounted on the discount curve.
+
+**Curve sets** (`--curve-set`) name any number of curves, each from its own quotes file:
+
+```csv
+name,quotes,discount,calendar,spot_lag
+sofr,usd_sofr.csv,,us,2
+term-sofr-3m,usd_term_sofr_3m.csv,sofr,us,2
+treasury,usd_treasury.csv,,weekends,0
+```
+
+| Column | Required | Meaning |
+|--------|----------|---------|
+| `name` | yes | the curve's name, used by `--curve-name` |
+| `quotes` | yes | quotes file, relative to the set file |
+| `discount` | no | the curve that discounts it; empty for a curve that discounts itself |
+| `interp`, `extrapolation`, `calendar`, `spot_lag` | no | override the command line for this curve |
+
+`--curve-name` picks the curve a command uses; bonds discount on that curve's discount curve.
+`fit curve build` reports every curve. With `--curve` the curve is named `curve`, and with the
+pair the curves are `discount` and `projection` (the default).
 
 **Positions and trades** (`--portfolio`, `--trades`):
 
