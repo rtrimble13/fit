@@ -30,6 +30,16 @@ with the reason and the size of the effect.
   [ADR 0015](docs/adr/0015-selectable-extrapolation.md).
 - `fit curve build` reports the extrapolation in its summary (`extrapolation` row/field). This
   is an additive output change, and no existing value changes.
+- Multi-curve construction. `--discount-curve FILE --projection-curve FILE` bootstraps a
+  projection curve, such as 3M Term SOFR, on an OIS discount curve. Its swaps' floating legs
+  are projected on the projection curve and every cash flow is discounted on the discount
+  curve. `fit curve query` and `fit curve forwards` report the projection curve. `fit curve
+  build` reports both curves (`curves`, `market` and `nodes` tables). Bonds discount on the
+  discount curve. Validated against QuantLib 1.44's dual-curve `SwapRateHelper` bootstrap to
+  2e-12. See [ADR 0016](docs/adr/0016-multi-curve-construction.md).
+- `irs` quote type: a fixed vs term-rate swap, by default annual ACT/360 fixed against
+  quarterly floating periods. The new `float_frequency` column sets the floating periods.
+- Example projection curve `examples/data/usd_term_sofr_3m.csv`.
 
 ### Fixed
 

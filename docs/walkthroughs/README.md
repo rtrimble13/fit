@@ -6,7 +6,7 @@ commands from the repository root and compare.
 
 | # | Walk-through | Commands covered | You will learn to |
 |---|--------------|------------------|-------------------|
-| 1 | [Yield curves](01-yield-curves.md) | `fit curve build`, `query`, `forwards` | bootstrap a curve from quotes, verify repricing, choose an interpolation scheme, read zero, par and forward rates, derive the forward-implied curve |
+| 1 | [Yield curves](01-yield-curves.md) | `fit curve build`, `query`, `forwards` | bootstrap a curve from quotes, verify repricing, choose an interpolation scheme and extrapolation, read zero, par and forward rates, derive the forward-implied curve, build a projection curve on an OIS discount curve |
 | 2 | [Bond pricing and risk](02-bond-pricing.md) | `fit bond price`, `yield`, `cashflows`, `risk` | move between price and yield, price off a curve, measure richness with z-spread, list cashflows, compute duration, convexity, DV01 and key-rate risk |
 | 3 | [Forecasting](03-forecasting.md) | `fit bond forecast` | project returns to a horizon, attribute them to carry, roll-down and rate moves, run rate and curve scenarios, find breakevens |
 | 4 | [Portfolio valuation and risk](04-portfolio.md) | `fit portfolio value`, `risk`, `scenario`, `cashflows` | mark a book to market and model, aggregate risk, build a key-rate ladder, stress the book, project cashflows, export reports |

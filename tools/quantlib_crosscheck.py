@@ -17,6 +17,9 @@ pillar QuantLib holds the last discrete forward, fit the last instantaneous forw
 
 Beyond the last pillar, flat-forward extrapolation (ADR 0015) is compared for the flat-forward
 and linear-zero curves, whose QuantLib counterparts hold the instantaneous forward there.
+
+The SOFR OIS curve is compared with OISRateHelper, and the 3M projection curve built on it with
+SwapRateHelper and an exogenous discounting curve (ADR 0016).
 """
 import json
 import subprocess
@@ -131,5 +134,25 @@ sofr=ql.PiecewiseLogLinearDiscount(a,ois,ql.Actual365Fixed())
 for n in nodes: cmp("sofr df "+n["tenor"],n["discount"],sofr.discount(D(n["pillar"])),1e-9)
 q=fit("curve","query","--curve","examples/data/usd_sofr.csv","--asof",asof,"--spot-lag","2","--calendar","us","--dates","2027-08-03,2030-01-15,2041-06-30,2050-02-02")["curve"]
 for n in q: cmp("sofr interp df "+n["date"],n["discount"],sofr.discount(D(n["date"])),1e-9)
+# Dual curve (ADR 0016): the 3M projection curve on the SOFR OIS curve. SwapRateHelper with an
+# exogenous discounting curve; withIndexedCoupons=False gives par coupons, as fit uses.
+print("dual curve")
+ibor=ql.IborIndex("TSOFR3M",ql.Period("3M"),2,ql.USDCurrency(),cal,ql.ModifiedFollowing,False,ql.Actual360())
+dh=ql.YieldTermStructureHandle(sofr)
+pq=[("deposit","3M",4.29),("irs","1Y",4.02),("irs","2Y",3.81),("irs","3Y",3.76),("irs","5Y",3.79),("irs","7Y",3.88),("irs","10Y",4.01),("irs","15Y",4.16),("irs","20Y",4.20),("irs","30Y",4.10)]
+ph=[]
+for t,ten,r in pq:
+    rq=ql.QuoteHandle(ql.SimpleQuote(r/100))
+    if t=="deposit":
+        ph.append(ql.DepositRateHelper(rq,ql.Period(ten),2,cal,ql.ModifiedFollowing,False,ql.Actual360()))
+    else:
+        ph.append(ql.SwapRateHelper(rq,ql.Period(ten),cal,ql.Annual,ql.ModifiedFollowing,ql.Actual360(),ibor,
+                                    ql.QuoteHandle(),ql.Period(0,ql.Days),dh,ql.nullInt(),ql.Pillar.LastRelevantDate,ql.Date(),False,False))
+proj=ql.PiecewiseLogLinearDiscount(a,ph,ql.Actual365Fixed())
+dual=["--discount-curve","examples/data/usd_sofr.csv","--projection-curve","examples/data/usd_term_sofr_3m.csv","--asof",asof,"--spot-lag","2","--calendar","us"]
+for n in fit("curve","build",*dual)["nodes"]:
+    if n["curve"]=="projection": cmp("projection df "+n["tenor"],n["discount"],proj.discount(D(n["pillar"])),1e-9)
+q=fit("curve","query",*dual,"--dates","2027-08-03,2030-01-15,2041-06-30,2050-02-02")["curve"]
+for n in q: cmp("projection interp df "+n["date"],n["discount"],proj.discount(D(n["date"])),1e-9)
 print(f"{failures} failure(s)")
 sys.exit(1 if failures else 0)

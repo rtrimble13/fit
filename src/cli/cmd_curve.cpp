@@ -9,9 +9,60 @@ namespace fit::cli {
 
 namespace {
 
+// One row per quote of `b`, led by the curve's name when the market has several curves.
+void add_nodes(Table& nodes, const NamedCurve* named, const BootstrapResult& b) {
+    for (std::size_t i = 0; i < b.quotes.size(); ++i) {
+        const Quote& q = b.quotes[i];
+        std::vector<Cell> row;
+        if (named != nullptr) {
+            row.emplace_back(named->name);
+        }
+        for (Cell cell : std::vector<Cell>{
+                 q.label, to_string(q.type), q.pillar.to_string(), b.curve->times()[i],
+                 q.rate * 100.0, b.curve->zero_rates()[i] * 100.0, b.curve->discount(q.pillar),
+                 (b.implied[i] - q.rate) * 1e4}) {
+            row.push_back(std::move(cell));
+        }
+        nodes.row(std::move(row));
+    }
+}
+
+void node_columns(Table& nodes) {
+    nodes.column("tenor").column("type").column("pillar").column("years", 4);
+    nodes.column("quote_pct", 4).column("zero_cc_pct", 4).column("discount", 6);
+    nodes.column("error_bp", 6);
+}
+
+// Several curves: one summary row per curve and one nodes table led by the curve's name.
+void multi_curve_build(const Market& m, Report& report) {
+    Table& curves = report.add(Table("curves"));
+    curves.column("curve").column("discount_curve").column("interpolation");
+    curves.column("extrapolation").column("nodes", 0).column("bootstrap_passes", 0);
+    curves.column("max_repricing_error_bp", 8);
+    for (const NamedCurve& c : m.curves) {
+        const BootstrapResult& b = c.bootstrap;
+        curves.row({c.name, c.discount_name, to_string(b.curve->method()),
+                    to_string(b.curve->extrapolation()), static_cast<double>(b.quotes.size()),
+                    static_cast<double>(b.passes), b.max_error * 1e4});
+    }
+    Table& summary = report.add(Table::key_value("market"));
+    summary.add("as_of", m.as_of.to_string());
+    summary.add("calendar", m.calendar.name());
+    Table& nodes = report.add(Table("nodes"));
+    nodes.column("curve");
+    node_columns(nodes);
+    for (const NamedCurve& c : m.curves) {
+        add_nodes(nodes, &c, c.bootstrap);
+    }
+}
+
 void curve_build(const Args& args, Report& report) {
     const Market m = load_market(args);
-    const BootstrapResult& b = m.bootstrap;
+    if (m.multi_curve) {
+        multi_curve_build(m, report);
+        return;
+    }
+    const BootstrapResult& b = m.curves.front().bootstrap;
 
     Table& summary = report.add(Table::key_value("curve"));
     summary.add("as_of", m.as_of.to_string());
@@ -23,15 +74,8 @@ void curve_build(const Args& args, Report& report) {
     summary.add("max_repricing_error_bp", b.max_error * 1e4, 8);
 
     Table& nodes = report.add(Table("nodes"));
-    nodes.column("tenor").column("type").column("pillar").column("years", 4);
-    nodes.column("quote_pct", 4).column("zero_cc_pct", 4).column("discount", 6);
-    nodes.column("error_bp", 6);
-    for (std::size_t i = 0; i < b.quotes.size(); ++i) {
-        const Quote& q = b.quotes[i];
-        nodes.row({q.label, to_string(q.type), q.pillar.to_string(), b.curve->times()[i],
-                   q.rate * 100.0, b.curve->zero_rates()[i] * 100.0, b.curve->discount(q.pillar),
-                   (b.implied[i] - q.rate) * 1e4});
-    }
+    node_columns(nodes);
+    add_nodes(nodes, nullptr, b);
 }
 
 void curve_query(const Args& args, Report& report) {

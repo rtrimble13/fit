@@ -24,6 +24,7 @@ ADRs are the authoritative explanation of *why* the code looks the way it does; 
 | [0013](0013-horizon-analysis-methodology.md) | Horizon analysis methodology | Accepted |
 | [0014](0014-monotone-convex-interpolation.md) | Monotone convex interpolation | Proposed |
 | [0015](0015-selectable-extrapolation.md) | Selectable extrapolation beyond the last pillar | Proposed |
+| [0016](0016-multi-curve-construction.md) | Multi-curve construction: projection curves on a discount curve | Proposed |
 
 ## When an ADR is required
 

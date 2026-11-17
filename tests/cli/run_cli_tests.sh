@@ -99,6 +99,34 @@ expect_out '^2026-11-17 +2027-05-17 +0\.0000 +4\.2000 '  # first forward is the 
 expect_exit 0 curve build --curve "$DATA/usd_sofr.csv" --asof 2026-11-17 --spot-lag 2 --calendar us
 expect_out '^1W +deposit +2026-11-27 '     # T+2 start, rolled over Thanksgiving
 
+# ---- multi-curve: a projection curve on an OIS discount curve -----------------------------
+SOFR=(--asof 2026-11-17 --spot-lag 2 --calendar us)
+DUAL=(--discount-curve "$DATA/usd_sofr.csv" --projection-curve "$DATA/usd_term_sofr_3m.csv" "${SOFR[@]}")
+expect_exit 0 curve build "${DUAL[@]}"
+expect_out '^discount +discount +flat-forward +flat-forward +13 +1 +0\.00000000$'
+expect_out '^projection +discount +flat-forward +flat-forward +10 '
+expect_out '^projection +10Y +irs +2036-11-19 .* 4\.0100 .* 0\.000000$'
+expect_out '^discount +2Y +swap +2028-11-20 '
+expect_exit 0 curve build "${DUAL[@]}" --format json
+expect_out '"curves": \['; expect_out '"discount_curve": "discount"'
+expect_exit 0 curve forwards "${DUAL[@]}" --tenor 3M --end 1Y
+expect_out '^2026-11-17 +2027-02-17 +0\.0000 +4\.2900 '   # projection curve: its 3M fixing (92 days)
+# Bonds discount on the discount curve: the same price as on the OIS curve alone.
+expect_exit 0 bond price "${BOND[@]}" "${DUAL[@]}" --format csv
+DUAL_PRICE="$(grep '^clean_price,' "$OUT")"
+expect_exit 0 bond price "${BOND[@]}" --curve "$DATA/usd_sofr.csv" "${SOFR[@]}" --format csv
+[ "$DUAL_PRICE" = "$(grep '^clean_price,' "$OUT")" ] || fail "bond on dual curves: $DUAL_PRICE"
+expect_exit 2 curve build "${CURVE[@]}" --discount-curve "$DATA/usd_sofr.csv"
+expect_err 'give --curve, or --discount-curve with --projection-curve, not both'; expect_no_out
+expect_exit 2 curve build --discount-curve "$DATA/usd_sofr.csv" "${SOFR[@]}"
+expect_err '--discount-curve requires --projection-curve'
+expect_exit 2 curve build --projection-curve "$DATA/usd_term_sofr_3m.csv" "${SOFR[@]}"
+expect_err '--projection-curve requires --discount-curve'
+expect_exit 2 curve build --asof 2026-11-17
+expect_err "missing required option '--curve' \(or --discount-curve with --projection-curve\)"
+expect_exit 1 curve build --discount-curve "$DATA/usd_sofr.csv" --projection-curve "$DATA/usd_treasury.csv" "${SOFR[@]}"
+expect_err "^fit: error: projection curve: quote '1Y': a par bond quote prices on the curve itself"
+
 # ---- bond ---------------------------------------------------------------------------------
 # Published Excel PRICE() example.
 expect_exit 0 bond price --maturity 2017-11-15 --coupon 5.75 --daycount 30/360 \

@@ -175,10 +175,13 @@ start date: the as-of date advanced by the spot lag (`--spot-lag`, or the row's
 |------|--------------------|-------------|
 | `deposit` | `(DF(S)/DF(E') - 1) / tau(S, E')`, `E'` = `E` adjusted modified-following | `E'` |
 | `swap` | `(DF(S) - DF(P_n)) / sum_i tau_i DF(P_i)` over the fixed schedule. Each period accrues from the previous adjusted date (`S` for the first) to its own end adjusted modified-following, `P_i`, and is paid on `P_i`, as in ISDA swaps | last payment |
+| `irs` | the same formula on one curve. On a projection curve, see below | last payment |
 | `par` | same formula over the coupon schedule, payments adjusted following; equivalent to a bond with that coupon pricing at 100 on `S` | last payment |
 | `zero` | `z(E)`; no spot lag | `E` |
 
-Defaults: `deposit` ACT/360; `swap` annual, ACT/360; `par` semi-annual, ACT/ACT ICMA.
+Defaults: `deposit` ACT/360; `swap` annual, ACT/360; `irs` annual ACT/360 fixed against
+quarterly floating periods (`float_frequency`, a 3M term rate); `par` semi-annual, ACT/ACT
+ICMA.
 Schedules are generated as in section 2 with `S` as the dated date. The `swap` formula is the
 single-curve result: the floating leg is worth `DF(S) - DF(P_n)`.
 
@@ -192,6 +195,23 @@ stop when the largest repricing error over all quotes is at most `1e-12` in rate
 and `monotone-convex` three or four.
 If 100 sweeps do not converge the command fails; a curve that does not reprice is never
 returned.
+
+**Projection curves** ([ADR 0016](adr/0016-multi-curve-construction.md)). A projection curve
+`P` is bootstrapped on an already built discount curve `D`, for example a 3M term-rate curve on
+the SOFR OIS curve. The algorithm is the same, with `D` held fixed. Floating legs are projected
+on `P` and every leg is discounted on `D`:
+
+| Type | Model-implied rate on `P` with discount curve `D` |
+|------|---------------------------------------------------|
+| `deposit` | `(P(S)/P(E') - 1) / tau(S, E')`: a term-rate fixing |
+| `swap` | `sum_j D(P_j) (P(P_(j-1))/P(P_j) - 1) / sum_i tau_i D(P_i)` over the fixed schedule (overnight compounding telescopes within each period on `P`) |
+| `irs` | the same, with the floating sum over the floating schedule (`float_frequency` periods a year, adjusted modified-following) |
+| `zero` | `z_P(E)` |
+| `par` | not allowed |
+
+Floating coupons are par coupons: each pays the forward of `P` over its own accrual period, so
+the floating day count cancels. When `P` and `D` are the same curve the floating legs telescope
+to `D(S) - D(P_n)` and the single-curve formulas above result.
 
 ## 5. Bonds
 
@@ -350,6 +370,8 @@ Expected values in the test suite come from sources independent of this code bas
 | Accrued, clean price, durations, convexity across day counts, frequencies, stubs and month-end schedules | QuantLib `BondFunctions` | `1e-9` relative |
 | Bootstrapped discount factors (`flat-forward`, `linear-zero`) at and between pillars | QuantLib `PiecewiseLogLinearDiscount`, `PiecewiseLinearZero` | `1e-9` |
 | Bootstrapped SOFR OIS discount factors (`swap` quotes, spot lag, US calendar) at and between pillars | QuantLib 1.44 `OISRateHelper` with default (modified-following, annual, ACT/360) conventions | `1e-10` |
+| Dual-curve projection curve (`deposit` and `irs` on the SOFR OIS curve; `flat-forward` and `linear-zero`) at and between pillars | QuantLib 1.44 `SwapRateHelper` with a 3M `IborIndex`, an exogenous discounting curve and par coupons; 3M forwards agree to `1e-11`% | `1e-10` |
+| Floating legs on a projection curve | hand calculation on flat curves | `1e-15` |
 | Curve price with z-spread | QuantLib `ZeroSpreadedTermStructure` | `1e-8` |
 | Natural cubic and monotone cubic interpolation | SciPy `CubicSpline(bc_type="natural")`, `PchipInterpolator` | `1e-11` |
 | Monotone convex interpolation: forwards in every region, with uneven spacing and negative and mixed-sign rates | QuantLib 1.44 `ConvexMonotoneInterpolation` with quadraticity 0, monotonicity 1, `forcePositive` false (the published method); hand calculations for each region and for the positivity bounds | `1e-15` |

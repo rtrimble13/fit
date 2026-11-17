@@ -58,7 +58,7 @@ void portfolio_value(const Args& args, Report& report) {
     const Market market = load_market(args);
     const auto positions = load_book(args, market.calendar);
     const PortfolioValuation v =
-        value_portfolio(positions, valuation_date(args, market), market.curve);
+        value_portfolio(positions, valuation_date(args, market), market.discount);
     add_positions(report.add(Table("positions")), v);
     add_totals(report.add(Table::key_value("totals")), v);
 }
@@ -68,7 +68,7 @@ void portfolio_risk(const Args& args, Report& report) {
     const auto positions = load_book(args, market.calendar);
     const KeyTenors keys = parse_key_tenors(args);
     const PortfolioValuation v =
-        value_portfolio(positions, valuation_date(args, market), market.curve, keys.years);
+        value_portfolio(positions, valuation_date(args, market), market.discount, keys.years);
 
     Table& t = report.add(Table("key_rate_dv01"));
     t.column("id");
@@ -97,14 +97,14 @@ void portfolio_scenario(const Args& args, Report& report) {
     const Market market = load_market(args);
     const auto positions = load_book(args, market.calendar);
     const PortfolioValuation v =
-        value_portfolio(positions, valuation_date(args, market), market.curve);
+        value_portfolio(positions, valuation_date(args, market), market.discount);
 
     Table& t = report.add(Table("scenarios"));
     t.column("scenario").column("market_value", 2, true).column("pnl", 2, true);
     t.column("pnl_pct", 3);
     t.row({std::string("base"), v.market_value, 0.0, 0.0});
     for (const NamedShift& s : parse_shifts(args.require("shifts"))) {
-        const double mv = shocked_market_value(positions, v, market.curve, s.shift);
+        const double mv = shocked_market_value(positions, v, market.discount, s.shift);
         t.row({s.label, mv, mv - v.market_value,
                100.0 * (mv - v.market_value) / std::fabs(v.market_value)});
     }
@@ -130,8 +130,8 @@ void portfolio_cashflows_cmd(const Args& args, Report& report) {
         Sum& s = buckets[key];
         s.coupon += f.coupon;
         s.principal += f.principal;
-        s.pv += (f.coupon + f.principal) * market.curve->discount(f.payment) /
-                market.curve->discount(settle);
+        s.pv += (f.coupon + f.principal) * market.discount->discount(f.payment) /
+                market.discount->discount(settle);
     }
     Table& t = report.add(Table("cashflows"));
     t.column(bucket == "none" ? "payment" : bucket).column("coupon", 2, true);
@@ -161,10 +161,10 @@ void pretrade(const Args& args, Report& report) {
     after_positions.insert(after_positions.end(), trades.begin(), trades.end());
 
     const PortfolioValuation before =
-        value_portfolio(before_positions, settle, market.curve, keys.years);
-    const PortfolioValuation trade = value_portfolio(trades, settle, market.curve, keys.years);
+        value_portfolio(before_positions, settle, market.discount, keys.years);
+    const PortfolioValuation trade = value_portfolio(trades, settle, market.discount, keys.years);
     const PortfolioValuation after =
-        value_portfolio(after_positions, settle, market.curve, keys.years);
+        value_portfolio(after_positions, settle, market.discount, keys.years);
 
     Table& tickets = report.add(Table("trades"));
     tickets.column("id").column("side").column("face", 0, true).column("clean_price", 4);

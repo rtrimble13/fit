@@ -33,7 +33,9 @@ std::vector<Command> portfolio_commands();
 
 // ---- Shared option groups and their loaders ----------------------------------------------------
 
-/// `--curve --asof --interp --extrapolation --calendar --holidays --spot-lag`.
+/// `--curve` (or `--discount-curve` with `--projection-curve`) `--asof --interp
+/// --extrapolation --calendar --holidays --spot-lag`. With `required`, a curve source and
+/// `--asof` must be given.
 std::vector<OptionSpec> curve_options(bool required);
 /// `--maturity --coupon --frequency --daycount --issue --settle --settle-days --no-eom`.
 std::vector<OptionSpec> bond_options();
@@ -43,12 +45,21 @@ std::vector<OptionSpec> key_tenor_options();
 
 std::vector<OptionSpec> operator+(std::vector<OptionSpec> a, const std::vector<OptionSpec>& b);
 
-/// A bootstrapped curve together with the inputs it was built from.
+/// One bootstrapped curve of a market, under the name output refers to it by.
+struct NamedCurve {
+    std::string name;
+    std::string discount_name; ///< the curve it is discounted on (its own name if itself)
+    BootstrapResult bootstrap;
+};
+
+/// The curves a command works with (ADR 0016).
 struct Market {
     Date as_of;
     Calendar calendar;
-    BootstrapResult bootstrap;
-    CurvePtr curve;
+    std::vector<NamedCurve> curves; ///< in build order: each after its discount curve
+    bool multi_curve = false;       ///< built from --discount-curve and --projection-curve
+    CurvePtr curve;    ///< the curve `curve` commands report: the projection curve if any
+    CurvePtr discount; ///< the curve that discounts it, and every bond
 };
 
 Calendar load_calendar(const Args& args);

@@ -11,7 +11,16 @@ std::vector<OptionSpec> operator+(std::vector<OptionSpec> a, const std::vector<O
 
 std::vector<OptionSpec> curve_options(bool required) {
     return {
-        {"curve", "FILE", "market quotes CSV (columns: type,tenor,rate)", "", required},
+        {"curve", "FILE",
+         std::string("market quotes CSV (columns: type,tenor,rate)") +
+             (required ? "; or --discount-curve with --projection-curve" : ""),
+         "", false},
+        {"discount-curve", "FILE",
+         "quotes CSV of the discount (OIS) curve, with --projection-curve", "", false},
+        {"projection-curve", "FILE",
+         "quotes CSV of a projection curve, bootstrapped on --discount-curve; bonds still "
+         "discount on --discount-curve",
+         "", false},
         {"asof", "DATE", "curve / valuation date (YYYY-MM-DD)", "", required},
         {"interp", "METHOD",
          "linear-zero | flat-forward | cubic-zero | monotone-cubic | monotone-convex",
@@ -60,7 +69,30 @@ Calendar load_calendar(const Args& args) {
     return calendar;
 }
 
+namespace {
+
+bool has_curve_source(const Args& args) {
+    return args.has("curve") || args.has("discount-curve") || args.has("projection-curve");
+}
+
+} // namespace
+
 Market load_market(const Args& args) {
+    const bool dual = args.has("discount-curve") || args.has("projection-curve");
+    if (args.has("curve") && dual) {
+        throw UsageError("give --curve, or --discount-curve with --projection-curve, not both");
+    }
+    if (dual && !args.has("projection-curve")) {
+        throw UsageError("--discount-curve requires --projection-curve");
+    }
+    if (dual && !args.has("discount-curve")) {
+        throw UsageError("--projection-curve requires --discount-curve");
+    }
+    if (!dual && !args.has("curve")) {
+        throw UsageError(
+            "missing required option '--curve' (or --discount-curve with --projection-curve)");
+    }
+
     Market m;
     m.as_of = Date::parse(args.require("asof"));
     m.calendar = load_calendar(args);
@@ -73,14 +105,34 @@ Market load_market(const Args& args) {
     if (const auto extrapolation = args.get("extrapolation")) {
         options.extrapolation = parse_extrapolation(*extrapolation);
     }
-    m.bootstrap = bootstrap(m.as_of, load_quotes(args.require("curve"), m.as_of, conventions),
-                            m.calendar, options);
-    m.curve = m.bootstrap.curve;
+    // Builds one curve, discounted on `discount` (empty: on itself); errors name the curve.
+    const auto build = [&](const std::string& role, const std::string& path, CurvePtr discount) {
+        try {
+            BootstrapOptions curve_options = options;
+            curve_options.discount = std::move(discount);
+            return bootstrap(m.as_of, load_quotes(path, m.as_of, conventions), m.calendar,
+                             curve_options);
+        } catch (const Error& e) {
+            throw Error(dual ? role + " curve: " + e.what() : e.what());
+        }
+    };
+    if (!dual) {
+        m.curves.push_back({"curve", "curve", build("", args.require("curve"), nullptr)});
+        m.curve = m.discount = m.curves.back().bootstrap.curve;
+        return m;
+    }
+    m.multi_curve = true;
+    m.curves.push_back(
+        {"discount", "discount", build("discount", args.require("discount-curve"), nullptr)});
+    m.discount = m.curves.back().bootstrap.curve;
+    m.curves.push_back({"projection", "discount",
+                        build("projection", args.require("projection-curve"), m.discount)});
+    m.curve = m.curves.back().bootstrap.curve;
     return m;
 }
 
 std::optional<Market> load_optional_market(const Args& args) {
-    if (!args.has("curve")) {
+    if (!has_curve_source(args)) {
         return std::nullopt;
     }
     return load_market(args);

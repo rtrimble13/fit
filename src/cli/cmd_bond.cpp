@@ -32,7 +32,8 @@ void bond_price(const Args& args, Report& report) {
     const Bond bond = make_bond(args, market ? market->calendar : load_calendar(args));
     const Date settle = settlement_date(args, bond);
     const Mark mark = make_mark(args, market.has_value());
-    const BondValuation v = value_bond(bond, settle, mark, market ? market->curve.get() : nullptr);
+    const BondValuation v =
+        value_bond(bond, settle, mark, market ? market->discount.get() : nullptr);
 
     Table& t = report.add(Table::key_value("bond"));
     add_valuation(t, v);
@@ -61,7 +62,7 @@ void bond_cashflows(const Args& args, Report& report) {
     t.column("coupon", 6).column("principal", 4).column("amount", 6);
     std::optional<BondValuation> v;
     if (market) {
-        v = value_bond(bond, settle, make_mark(args, true), market->curve.get());
+        v = value_bond(bond, settle, make_mark(args, true), market->discount.get());
         t.column("discount", 6).column("pv", 6);
     }
     double total = 0.0;
@@ -76,7 +77,7 @@ void bond_cashflows(const Args& args, Report& report) {
                               cf.principal,
                               cf.amount()};
         if (market) {
-            const YieldCurve& curve = *market->curve;
+            const YieldCurve& curve = *market->discount;
             const double df =
                 curve.discount(cf.payment) / curve.discount(settle) *
                 std::exp(-*v->z_spread * (curve.time(cf.payment) - curve.time(settle)));
@@ -101,10 +102,10 @@ void bond_risk(const Args& args, Report& report) {
     const Market market = load_market(args);
     const Bond bond = make_bond(args, market.calendar);
     const Date settle = settlement_date(args, bond);
-    const BondValuation v = value_bond(bond, settle, make_mark(args, true), market.curve.get());
+    const BondValuation v = value_bond(bond, settle, make_mark(args, true), market.discount.get());
     const KeyTenors keys = parse_key_tenors(args);
     const double bump = parse_double(args.require("bump-bp"), "--bump-bp") / 1e4;
-    const CurveRisk risk = curve_risk(bond, settle, market.curve, *v.z_spread, keys.years, bump);
+    const CurveRisk risk = curve_risk(bond, settle, market.discount, *v.z_spread, keys.years, bump);
 
     Table& t = report.add(Table::key_value("risk"));
     t.add("settle", settle.to_string());
@@ -151,7 +152,7 @@ void bond_forecast(const Args& args, Report& report) {
     bool first = true;
     for (const NamedShift& s : parse_shifts(args.require("shifts"))) {
         spec.shift = s.shift;
-        const HorizonResult r = horizon_analysis(bond, settle, mark, market.curve, spec);
+        const HorizonResult r = horizon_analysis(bond, settle, mark, market.discount, spec);
         if (first) {
             first = false;
             start.add("settle", r.settle.to_string());

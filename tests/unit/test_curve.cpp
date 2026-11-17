@@ -32,6 +32,22 @@ std::vector<Quote> sofr_quotes() {
     return load_quotes(std::string(FIT_EXAMPLES_DIR) + "/usd_sofr.csv", kAsOf, sofr_conventions());
 }
 
+std::vector<Quote> term_sofr_quotes() {
+    return load_quotes(std::string(FIT_EXAMPLES_DIR) + "/usd_term_sofr_3m.csv", kAsOf,
+                       sofr_conventions());
+}
+
+// The example 3M Term SOFR projection curve, bootstrapped on the SOFR OIS curve.
+BootstrapResult term_sofr_curve(InterpolationMethod method, CurvePtr* discount = nullptr) {
+    const Calendar us = sofr_conventions().calendar;
+    BootstrapOptions options{method};
+    options.discount = bootstrap(kAsOf, sofr_quotes(), us, {method}).curve;
+    if (discount != nullptr) {
+        *discount = options.discount;
+    }
+    return bootstrap(kAsOf, term_sofr_quotes(), us, options);
+}
+
 const InterpolationMethod kAllMethods[] = {
     InterpolationMethod::LinearZero, InterpolationMethod::FlatForward,
     InterpolationMethod::CubicZero, InterpolationMethod::MonotoneCubic,
@@ -461,6 +477,108 @@ TEST_CASE("bootstrap: SOFR OIS discount factors match QuantLib") {
     CHECK(r.curve->discount(Date(2056, 11, 20)) == doctest::Approx(0.303079304576).epsilon(tol));
     CHECK(r.curve->discount(Date(2030, 1, 15)) == doctest::Approx(0.890537861461).epsilon(tol));
     CHECK(r.curve->discount(Date(2050, 2, 2)) == doctest::Approx(0.387922247178).epsilon(tol));
+}
+
+TEST_CASE("bootstrap: irs quote conventions") {
+    const QuoteConventions conventions = sofr_conventions();
+    const Quote irs = make_quote(kAsOf, QuoteType::Irs, "2Y", 0.0381, conventions);
+    CHECK(parse_quote_type("IRS") == QuoteType::Irs);
+    CHECK(irs.day_count == DayCount::Act360);
+    CHECK(irs.frequency == 1);
+    CHECK(irs.float_frequency == 4); // default: a 3M term rate paid quarterly
+    CHECK(irs.pillar == Date(2028, 11, 20));
+    CHECK(make_quote(kAsOf, QuoteType::Irs, "2Y", 0.0381, conventions, "30/360", 2, 2)
+              .float_frequency == 2);
+    CHECK_THROWS_WITH(make_quote(kAsOf, QuoteType::Swap, "2Y", 0.0374, conventions, "", 0, 4),
+                      "quote '2Y': float_frequency applies to irs quotes only");
+}
+
+TEST_CASE("swap rate: floating legs on a projection curve") {
+    // Flat curves: projection 5%, discount 4%, continuously compounded on ACT/365F from the
+    // as-of date. A 1Y swap from Thursday 2026-11-19: annual ACT/360 fixed to 2027-11-19 (365
+    // days) against quarterly floating periods ending 2027-02-19, 05-19, 08-19 and 11-19, all
+    // business days. Each floating coupon is worth DF(e) (P(s) / P(e) - 1).
+    const InterpolatedCurve projection(kAsOf, {1.0}, {0.05}, InterpolationMethod::FlatForward);
+    const InterpolatedCurve discount(kAsOf, {1.0}, {0.04}, InterpolationMethod::FlatForward);
+    const Calendar weekends(Calendar::Rules::WeekendsOnly);
+    const std::vector<Date> dates{Date(2026, 11, 19), Date(2027, 2, 19), Date(2027, 5, 19),
+                                  Date(2027, 8, 19), Date(2027, 11, 19)};
+    const auto t = [](Date d) { return (d - kAsOf) / 365.0; };
+    double floating = 0.0;
+    for (std::size_t j = 1; j < dates.size(); ++j) {
+        floating += std::exp(-0.04 * t(dates[j])) *
+                    (std::exp(0.05 * (t(dates[j]) - t(dates[j - 1]))) - 1.0);
+    }
+    const double annuity = 365.0 / 360.0 * std::exp(-0.04 * t(dates.back()));
+    CHECK(swap_rate(projection, discount, dates.front(), dates.back(), 1, DayCount::Act360, 4,
+                    weekends) == doctest::Approx(floating / annuity).epsilon(1e-15));
+    // On one curve the floating frequency drops out: the legs telescope.
+    CHECK(swap_rate(discount, discount, dates.front(), dates.back(), 1, DayCount::Act360, 4,
+                    weekends) == doctest::Approx(swap_rate(discount, dates.front(), dates.back(), 1,
+                                                           DayCount::Act360, weekends))
+                                     .epsilon(1e-15));
+}
+
+TEST_CASE("bootstrap: a projection curve reprices on its discount curve") {
+    for (const auto method : kAllMethods) {
+        CAPTURE(to_string(method));
+        CurvePtr discount;
+        const BootstrapResult r = term_sofr_curve(method, &discount);
+        CHECK(r.max_error < 1e-12);
+        REQUIRE(r.quotes.size() == 10);
+        for (const Quote& q : r.quotes) {
+            CHECK(implied_quote_rate(q, *r.curve, *discount, sofr_conventions().calendar) ==
+                  doctest::Approx(q.rate).epsilon(1e-10));
+        }
+        // The projection forwards sit above the OIS ones: the 3M basis.
+        CHECK(r.curve->zero_rate(Date(2036, 11, 19)) > discount->zero_rate(Date(2036, 11, 19)));
+    }
+}
+
+TEST_CASE("bootstrap: projection discount factors match QuantLib dual-curve") {
+    // Reference: QuantLib 1.44. The discount curve is built as in "SOFR OIS discount factors
+    // match QuantLib". The projection curve is PiecewiseLogLinearDiscount / PiecewiseLinearZero
+    // from DepositRateHelper(3M, 2 fixing days) and SwapRateHelper(annual, modified following,
+    // ACT/360, IborIndex 3M on the US government bond calendar, discountingCurve = the OIS curve,
+    // withIndexedCoupons = false, i.e. par coupons). The agreement is 2e-12.
+    const double tol = 1e-10;
+    const BootstrapResult flat = term_sofr_curve(InterpolationMethod::FlatForward);
+    CHECK(flat.curve->discount(Date(2028, 11, 20)) == doctest::Approx(0.926637370138).epsilon(tol));
+    CHECK(flat.curve->discount(Date(2036, 11, 19)) == doctest::Approx(0.669137638033).epsilon(tol));
+    CHECK(flat.curve->discount(Date(2056, 11, 20)) == doctest::Approx(0.295960210600).epsilon(tol));
+    CHECK(flat.curve->discount(Date(2030, 1, 15)) == doctest::Approx(0.888294894312).epsilon(tol));
+    CHECK(flat.curve->discount(Date(2050, 2, 2)) == doctest::Approx(0.380858744214).epsilon(tol));
+    const BootstrapResult linear = term_sofr_curve(InterpolationMethod::LinearZero);
+    CHECK(linear.curve->discount(Date(2046, 11, 19)) ==
+          doctest::Approx(0.428763238618).epsilon(tol));
+    CHECK(linear.curve->discount(Date(2050, 2, 2)) == doctest::Approx(0.379349331779).epsilon(tol));
+}
+
+TEST_CASE("bootstrap: on one curve irs and swap quotes agree") {
+    // Without a separate discount curve the floating leg telescopes whatever its frequency, so an
+    // irs is the OIS swap with the same fixed leg.
+    const BootstrapResult sofr = bootstrap(kAsOf, sofr_quotes(), sofr_conventions().calendar);
+    const Quote irs = make_quote(kAsOf, QuoteType::Irs, "7Y", 0.038, sofr_conventions());
+    const Quote swap = make_quote(kAsOf, QuoteType::Swap, "7Y", 0.038, sofr_conventions());
+    CHECK(implied_quote_rate(irs, *sofr.curve, sofr_conventions().calendar) ==
+          doctest::Approx(implied_quote_rate(swap, *sofr.curve, sofr_conventions().calendar))
+              .epsilon(1e-15));
+}
+
+TEST_CASE("bootstrap: projection curve inputs are checked") {
+    const Calendar us = sofr_conventions().calendar;
+    BootstrapOptions options;
+    options.discount = bootstrap(kAsOf, sofr_quotes(), us).curve;
+    // A par bond quote cannot sit on a curve discounted elsewhere.
+    const Quote par = make_quote(kAsOf, QuoteType::Par, "5Y", 0.04, sofr_conventions());
+    CHECK_THROWS_WITH(bootstrap(kAsOf, {par}, us, options),
+                      "quote '5Y': a par bond quote prices on the curve itself, so it cannot be "
+                      "used on a curve discounted on another curve");
+    // The discount curve must be as of the same date.
+    options.discount = std::make_shared<InterpolatedCurve>(
+        Date(2026, 11, 18), std::vector{1.0}, std::vector{0.04}, InterpolationMethod::FlatForward);
+    CHECK_THROWS_WITH(bootstrap(kAsOf, term_sofr_quotes(), us, options),
+                      "bootstrap: the discount curve is as of 2026-11-18, not 2026-11-17");
 }
 
 TEST_CASE("bootstrap: a single swap reprices and matches the closed form") {
