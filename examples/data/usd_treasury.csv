@@ -1,0 +1,14 @@
+# Illustrative US Treasury curve as of 2026-11-17 (not real market data).
+# Bills are entered as simple ACT/360 deposit-style yields; notes and bonds as par yields.
+type,tenor,rate
+deposit,1M,4.32
+deposit,3M,4.28
+deposit,6M,4.20
+par,1Y,4.05
+par,2Y,3.90
+par,3Y,3.88
+par,5Y,3.95
+par,7Y,4.08
+par,10Y,4.25
+par,20Y,4.62
+par,30Y,4.58

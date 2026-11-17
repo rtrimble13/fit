@@ -1,0 +1,16 @@
+# Illustrative USD SOFR OIS curve as of 2026-11-17 (not real market data).
+# Swaps: annual fixed leg, ACT/360, discounted on the same curve.
+type,tenor,rate
+deposit,1W,4.33
+deposit,1M,4.31
+deposit,3M,4.24
+deposit,6M,4.12
+swap,1Y,3.96
+swap,2Y,3.74
+swap,3Y,3.68
+swap,5Y,3.71
+swap,7Y,3.80
+swap,10Y,3.93
+swap,15Y,4.08
+swap,20Y,4.12
+swap,30Y,4.02
