@@ -13,10 +13,11 @@
 namespace fit {
 
 enum class InterpolationMethod {
-    LinearZero,   ///< linear in continuously compounded zero rates
-    FlatForward,  ///< linear in -ln(DF): piecewise-constant instantaneous forwards
-    CubicZero,    ///< natural cubic spline in zero rates
-    MonotoneCubic ///< monotone cubic (PCHIP) in -ln(DF)
+    LinearZero,    ///< linear in continuously compounded zero rates
+    FlatForward,   ///< linear in -ln(DF): piecewise-constant instantaneous forwards
+    CubicZero,     ///< natural cubic spline in zero rates
+    MonotoneCubic, ///< monotone cubic (PCHIP) in -ln(DF)
+    MonotoneConvex ///< Hagan-West monotone convex in -ln(DF): continuous, positive forwards
 };
 
 InterpolationMethod parse_interpolation_method(std::string_view text);
@@ -98,6 +99,7 @@ private:
     std::vector<double> zero_rates_;
     InterpolationMethod method_;
     std::optional<Interpolation> interpolation_;
+    std::optional<MonotoneConvex> monotone_convex_;
 };
 
 /// `base` with a zero-rate shift added: DF'(t) = DF(t) * exp(-shift(t) * t).

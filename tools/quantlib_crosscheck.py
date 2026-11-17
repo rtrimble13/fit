@@ -10,6 +10,10 @@ validating numerical changes (see docs/PR_STANDARDS.md); it is not part of the b
 
 The cubic-zero scheme is not compared: QuantLib's zero-curve spline adds a node at t = 0,
 so the two curves legitimately differ between pillars.
+
+The monotone-convex scheme is compared with QuantLib's ConvexMonotone(0, 1, false), which is
+the published Hagan-West method (ADR 0014), and only inside the pillar range: beyond the last
+pillar QuantLib holds the last discrete forward, fit the last instantaneous forward.
 """
 import json
 import subprocess
@@ -72,8 +76,12 @@ for t,ten,r in quotes:
         mat=a+p
         sch=ql.Schedule(a,mat,ql.Period(ql.Semiannual),cal,ql.Unadjusted,ql.Unadjusted,ql.DateGeneration.Backward,False)
         hs.append(ql.FixedRateBondHelper(ql.QuoteHandle(ql.SimpleQuote(100.0)),0,100.0,sch,[r/100],ql.ActualActual(ql.ActualActual.ISMA,sch),ql.Following,100.0))
-for interp,cls in [("flat-forward",ql.PiecewiseLogLinearDiscount),("linear-zero",ql.PiecewiseLinearZero)]:
-    c=cls(a,hs,ql.Actual365Fixed()); c.enableExtrapolation()
+curves=[("flat-forward",lambda: ql.PiecewiseLogLinearDiscount(a,hs,ql.Actual365Fixed())),
+        ("linear-zero",lambda: ql.PiecewiseLinearZero(a,hs,ql.Actual365Fixed())),
+        ("monotone-convex",lambda: ql.PiecewiseConvexMonotoneForward(
+            a,hs,ql.Actual365Fixed(),[],[],ql.ConvexMonotone(0.0,1.0,False)))]
+for interp,make in curves:
+    c=make(); c.enableExtrapolation()
     nodes=fit("curve","build","--curve","examples/data/usd_treasury.csv","--asof",asof,"--interp",interp)["nodes"]
     print(interp)
     for n in nodes:

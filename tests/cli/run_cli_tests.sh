@@ -72,12 +72,13 @@ rm -f "$BAD"
 expect_exit 0 curve build "${CURVE[@]}"
 expect_out '^10Y +par +2036-11-17 +10\.0082 +4\.2500 +4\.2417 +0\.654084 +0\.000000$'
 expect_out '^max_repricing_error_bp +0\.00000000$'
-for interp in linear-zero flat-forward cubic-zero monotone-cubic; do
+for interp in linear-zero flat-forward cubic-zero monotone-cubic monotone-convex; do
     expect_exit 0 curve build "${CURVE[@]}" --interp "$interp"
     expect_out "^interpolation +$interp$"
     expect_out '^max_repricing_error_bp +0\.00000000$'
 done
 expect_exit 1 curve build "${CURVE[@]}" --interp wobbly
+expect_err "unknown interpolation .wobbly. .*monotone-convex"; expect_no_out
 expect_exit 0 curve query "${CURVE[@]}" --tenors 2Y,10Y
 expect_out '^2Y +2028-11-17 .* 3\.9000 '   # par rate of a pillar is its quote
 expect_exit 0 curve query "${CURVE[@]}" --tenors 5Y --horizon 1Y

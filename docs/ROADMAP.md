@@ -21,7 +21,7 @@ Methodology decisions referenced here are recorded in the [ADRs](adr/README.md).
 | Release | Theme | Status |
 |---------|-------|--------|
 | v0.1 | MVP: curves, fixed-rate bonds, horizon analysis, portfolio and pre-trade | Delivered |
-| v0.2 | Curve depth | Planned (next) |
+| v0.2 | Curve depth | In progress |
 | v0.3 | Instrument coverage | Planned |
 | v0.4 | Portfolio and risk depth | Planned |
 | v0.5 | Integration and performance | Planned |
@@ -76,7 +76,7 @@ roadmap item where noted.
 | Curve construction | No futures, FRAs or basis swaps; no turn-of-year or meeting-date handling | v0.2 |
 | Curve construction | `swap` quotes assume an annual fixed leg and a single-curve floating leg | v0.2 |
 | Curve construction | Exact bootstrap only; no smoothing or parametric fit | v0.2 |
-| Interpolation | No monotone convex scheme; `flat-forward` forwards are discontinuous at nodes; `cubic-zero` can oscillate | v0.2 |
+| Interpolation | The default, `flat-forward`, has forwards that are discontinuous at nodes, and `cubic-zero` can oscillate; `monotone-convex` avoids both but is not yet the default | v0.2 |
 | Extrapolation | Outside the pillar range the zero rate (or, for the log-discount schemes, the last forward rate) is simply held flat | v0.2 |
 | Curve construction | Swap and par-bond accrual periods use unadjusted dates; only payment dates are business-day adjusted | v0.2 |
 | Calendars | Only weekends-only, a rule-based US government bond calendar and user-supplied holiday files; the rule-based calendar knows only a handful of historical ad hoc market closures | v0.2 |
@@ -117,7 +117,7 @@ The following are outside the intended scope of `fit` and are not planned:
 
 | Item | Description |
 |------|-------------|
-| Monotone convex interpolation | Hagan–West monotone convex scheme, with continuous positive forwards; candidate new default after validation (requires an ADR superseding the default in ADR 0007) |
+| Monotone convex interpolation | Hagan–West monotone convex scheme, with continuous positive forwards; candidate new default after validation (requires an ADR superseding the default in ADR 0007). *Scheme available as `monotone-convex` ([ADR 0014](adr/0014-monotone-convex-interpolation.md)); the default decision is outstanding.* |
 | Parametric fitting | Nelson–Siegel and Nelson–Siegel–Svensson least-squares fit to bond prices or yields, with fit diagnostics (per-instrument residuals, RMSE), as a complement to exact bootstrap |
 | Multi-curve construction | Separate discount (OIS) and projection curves; dual-curve bootstrap of term-rate swaps; curve sets addressable by name |
 | Additional instruments for construction | Interest-rate futures with convexity adjustment, FRAs, swaps with explicit fixed/floating leg conventions, basis swaps |

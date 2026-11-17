@@ -81,9 +81,47 @@ DF(t) = exp(-z(t) t)
 | `linear-zero` | `z` linear in `t` | zero rate flat | zero rate flat |
 | `cubic-zero` | natural cubic spline through `(t_i, z_i)` | zero rate flat | zero rate flat |
 | `monotone-cubic` | monotone cubic Hermite (Fritsch-Carlson, "PCHIP") through `(t_i, z_i t_i)` anchored at `(0, 0)` | follows the spline | last forward rate flat |
+| `monotone-convex` | Hagan-West monotone convex through `(t_i, z_i t_i)` anchored at `(0, 0)` (below) | follows the scheme | instantaneous forward at the last node held flat |
 
 `monotone-cubic` preserves the monotonicity of `-ln DF`, so interpolated forward rates are
 non-negative wherever the node discount factors are non-increasing.
+
+**Monotone convex** (P. S. Hagan and G. West, "Interpolation methods for curve construction",
+*Applied Mathematical Finance* 13(2), 2006; "Methods for constructing a yield curve", *Wilmott
+Magazine*, May 2008; decisions in [ADR 0014](adr/0014-monotone-convex-interpolation.md)).
+The scheme constructs the instantaneous forward `f(t)` directly. With nodes
+`t_0 = 0 < t_1 < ... < t_n`, `h_i = t_i - t_(i-1)` and discrete forwards
+`fd_i = (z_i t_i - z_(i-1) t_(i-1)) / h_i`:
+
+1. Node forwards. Interior nodes use `f_i = (h_i fd_(i+1) + h_(i+1) fd_i) / (h_i + h_(i+1))`,
+   which is linear interpolation of the discrete forwards placed at their interval midpoints.
+   The ends use `f_0 = fd_1 - (f_1 - fd_1) / 2` and `f_n = fd_n - (f_(n-1) - fd_n) / 2`,
+   computed before step 2. A curve with one pillar has `f_0 = f_1 = fd_1`, which makes it a
+   flat curve.
+2. Positivity. Each node forward is clamped to `[0, 2 min(adjacent fd)]` if every adjacent
+   discrete forward is non-negative. The end nodes have one adjacent forward, so their bounds
+   are `[0, 2 fd_1]` and `[0, 2 fd_n]`. A node next to a negative discrete forward is not
+   clamped, so on negative-rate curves the scheme is the unconstrained method.
+3. Shape. On interval `i`, let `u = (t - t_(i-1)) / h_i`, `g0 = f_(i-1) - fd_i` and
+   `g1 = f_i - fd_i`. Then `f(t) = fd_i + g(u)`, where `g` depends on the region:
+
+| Region | Condition | `g(u)` |
+|--------|-----------|--------|
+| (i) | `g0`, `g1` of opposite sign, `abs(g0)/2 <= abs(g1) <= 2 abs(g0)` | `g0 (1 - 4u + 3u^2) + g1 (3u^2 - 2u)` |
+| (ii) | opposite sign, `abs(g1) > 2 abs(g0)` | `g0` for `u <= eta`, then `g0 + (g1 - g0) ((u - eta)/(1 - eta))^2`; `eta = (g1 + 2 g0)/(g1 - g0)` |
+| (iii) | opposite sign, `abs(g1) < abs(g0)/2` | `g1 + (g0 - g1) ((eta - u)/eta)^2` for `u < eta`, then `g1`; `eta = 3 g1/(g1 - g0)` |
+| (iv) | same sign | `A + (g0 - A) ((eta - u)/eta)^2` for `u < eta`, then `A + (g1 - A) ((u - eta)/(1 - eta))^2`; `eta = g1/(g0 + g1)`, `A = -g0 g1/(g0 + g1)` |
+| | `g0 = 0` or `g1 = 0` | `0`, the limit of the regions above |
+
+Every `g` integrates to zero over its interval, so `f` averages to `fd_i` and the curve
+reprices its nodes: `-ln DF(t) = z_(i-1) t_(i-1) + h_i (fd_i u + integral of g from 0 to u)`.
+The forward is continuous, including at the pillars. On an interval whose discrete forward lies
+between its neighbours', the forward is monotone. Where the discrete forwards are non-negative,
+it is non-negative. Changing a pillar moves the forward on at most two intervals on each side.
+
+In one degenerate case the forward does jump. When two adjacent discrete forwards are equal and
+the next differs, the limit of the construction is a step in the forward at a pillar. Discount
+factors stay continuous in the inputs, so the bootstrap and risk are unaffected.
 
 **Derived rates:**
 
@@ -133,7 +171,8 @@ order, the node's zero rate is solved by Brent's method so that its own instrume
 with all other nodes held fixed. (On the first sweep, nodes not yet solved are kept level
 with the node being solved, which makes that sweep a classic sequential bootstrap.) Sweeps
 stop when the largest repricing error over all quotes is at most `1e-12` in rate terms
-(`1e-8` bp). Local schemes converge in one sweep; `cubic-zero` typically needs four to six.
+(`1e-8` bp). Local schemes converge in one sweep; `cubic-zero` typically needs four to six,
+and `monotone-convex` three or four.
 If 100 sweeps do not converge the command fails; a curve that does not reprice is never
 returned.
 
@@ -295,6 +334,8 @@ Expected values in the test suite come from sources independent of this code bas
 | Bootstrapped discount factors (`flat-forward`, `linear-zero`) at and between pillars | QuantLib `PiecewiseLogLinearDiscount`, `PiecewiseLinearZero` | `1e-9` |
 | Curve price with z-spread | QuantLib `ZeroSpreadedTermStructure` | `1e-8` |
 | Natural cubic and monotone cubic interpolation | SciPy `CubicSpline(bc_type="natural")`, `PchipInterpolator` | `1e-11` |
+| Monotone convex interpolation: forwards in every region, with uneven spacing and negative and mixed-sign rates | QuantLib 1.44 `ConvexMonotoneInterpolation` with quadraticity 0, monotonicity 1, `forcePositive` false (the published method); hand calculations for each region and for the positivity bounds | `1e-15` |
+| Bootstrapped `monotone-convex` discount factors at and between pillars | QuantLib 1.44 `PiecewiseConvexMonotoneForward` with `ConvexMonotone(0, 1, false)` | `1e-10` |
 | US government bond calendar | QuantLib, every day 1990-2060 | exact |
 | Day counts | ISDA ACT/ACT examples | exact |
 
@@ -308,3 +349,9 @@ plus spread.
 `cubic-zero` is validated by repricing and by the spline test rather than against QuantLib's
 cubic zero curve, which places an additional node at `t = 0` and so differs between pillars
 by construction.
+
+`monotone-convex` is compared with QuantLib only inside the pillar range. Beyond the last
+pillar, QuantLib's piecewise forward curve holds the last discrete forward, while `fit` holds
+the last instantaneous forward so that forwards stay continuous. QuantLib's default
+`ConvexMonotone(0.3, 0.7, true)` blends in other shapes and applies positivity differently, so
+it is not the published method.

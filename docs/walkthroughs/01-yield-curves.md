@@ -147,20 +147,21 @@ tenor       date          years  zero_cc_pct  zero_sa_pct  par_sa_pct  fwd_inst_
 
 ## 4. Choosing an interpolation scheme
 
-Four schemes are available through `--interp`:
+Five schemes are available through `--interp`:
 
 | Scheme | Interpolates | Forwards | Use when |
 |--------|--------------|----------|----------|
 | `flat-forward` (default) | `ln DF` linearly | piecewise constant, jump at pillars | robust default; pricing and risk |
 | `linear-zero` | zero rates linearly | discontinuous, can saw-tooth | matching systems that use it |
 | `cubic-zero` | zero rates, natural cubic spline | smooth; can oscillate | smooth forwards matter and inputs are clean |
-| `monotone-cubic` | `-ln DF`, monotone cubic | smooth and well behaved | smooth forwards without overshoot |
+| `monotone-cubic` | `-ln DF`, monotone cubic | smooth and well behaved | smooth discount factors without overshoot |
+| `monotone-convex` | the forward curve itself (Hagan-West) | continuous; positive where the discrete forwards are; no overshoot where they are monotone | forwards between pillars matter |
 
-All four reprice the inputs exactly. They differ *between* pillars, and the difference shows up
+All five reprice the inputs exactly. They differ *between* pillars, and the difference shows up
 most clearly in forwards. Here is the instantaneous forward at a few off-pillar points:
 
 ```console
-$ for m in flat-forward linear-zero cubic-zero monotone-cubic; do echo "--- $m"; fit curve query --curve examples/data/usd_treasury.csv --asof 2026-11-17 --interp $m --tenors 4Y,8Y,15Y,25Y --format csv | cut -d, -f1,4,7; done
+$ for m in flat-forward linear-zero cubic-zero monotone-cubic monotone-convex; do echo "--- $m"; fit curve query --curve examples/data/usd_treasury.csv --asof 2026-11-17 --interp $m --tenors 4Y,8Y,15Y,25Y --format csv | cut -d, -f1,4,7; done
 --- flat-forward
 tenor,zero_cc_pct,fwd_inst_pct
 4Y,3.8807856996,4.03640334226
@@ -185,6 +186,12 @@ tenor,zero_cc_pct,fwd_inst_pct
 8Y,4.11874706776,4.62995651277
 15Y,4.55593676975,5.31914474415
 25Y,4.65935270063,4.34364901846
+--- monotone-convex
+tenor,zero_cc_pct,fwd_inst_pct
+4Y,3.8594292572,4.03535990748
+8Y,4.11982892323,4.65259121019
+15Y,4.54315997896,5.33306533511
+25Y,4.65461002465,4.29028180642
 ```
 
 Zero rates agree to within a few basis points; forwards can differ by tens of basis points,
@@ -205,6 +212,29 @@ nodes                           11
 bootstrap_passes                 5
 max_repricing_error_bp  0.00000000
 ```
+
+`monotone-convex` constructs the forward curve directly, following Hagan and West. Between two
+pillars the instantaneous forward averages exactly to the discrete forward. The forward is
+continuous at the pillars, where `flat-forward` forwards jump. Where the discrete forwards are
+positive it stays positive, and where they rise or fall steadily it does not overshoot. The
+scheme is local, since a quote affects forwards only on neighbouring intervals, but it is not
+strictly local, so the bootstrap again takes a few sweeps:
+
+```console
+$ fit curve build --curve examples/data/usd_treasury.csv --asof 2026-11-17 --interp monotone-convex | head -8
+curve
+=====
+as_of                        2026-11-17
+interpolation           monotone-convex
+calendar                       weekends
+nodes                                11
+bootstrap_passes                      4
+max_repricing_error_bp       0.00000000
+```
+
+The default remains `flat-forward`. The method and its validation are described in
+[METHODOLOGY.md](../METHODOLOGY.md#3-yield-curves) and
+[ADR 0014](../adr/0014-monotone-convex-interpolation.md).
 
 ## 5. Forward rates
 
