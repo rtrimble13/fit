@@ -78,7 +78,6 @@ roadmap item where noted.
 | Curve construction | Exact bootstrap only; no smoothing or parametric fit | v0.2 |
 | Interpolation | The default, `flat-forward`, has forwards that are discontinuous at nodes, and `cubic-zero` can oscillate; `monotone-convex` avoids both but is not yet the default | v0.2 |
 | Extrapolation | Beyond the last pillar the zero rate or the last forward is held flat, selectable with `--extrapolation`; no ultimate-forward-rate method | Not scheduled |
-| Curve construction | Swap and par-bond accrual periods use unadjusted dates; only payment dates are business-day adjusted | v0.2 |
 | Calendars | Only weekends-only, a rule-based US government bond calendar and user-supplied holiday files; the rule-based calendar knows only a handful of historical ad hoc market closures | v0.2 |
 | Instruments | Fixed-rate bullets and zeros only | v0.3 |
 | Yield conventions | Street convention only; no US Treasury final-period simple yield, no money-market or discount yields for bills | v0.3 |

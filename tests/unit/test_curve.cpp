@@ -431,6 +431,38 @@ TEST_CASE("bootstrap: quote conventions") {
     CHECK_THROWS_AS(parse_quote_type("future"), Error);
 }
 
+TEST_CASE("bootstrap: swap periods accrue between adjusted dates") {
+    // A 2Y annual ACT/360 swap from Thursday 2026-11-19 on a flat 4% curve. The maturity,
+    // 2028-11-19, is a Sunday, so the last period runs to Monday 2028-11-20 (modified
+    // following): accruals 365/360 and 367/360 days, the latter crossing 29 Feb 2028.
+    const InterpolatedCurve curve(kAsOf, {1.0, 5.0}, {0.04, 0.04}, InterpolationMethod::LinearZero);
+    const Date start(2026, 11, 19);
+    const Date first(2027, 11, 19);
+    const Date last(2028, 11, 20);
+    const double annuity =
+        365.0 / 360.0 * curve.discount(first) + 367.0 / 360.0 * curve.discount(last);
+    const double expected = (curve.discount(start) - curve.discount(last)) / annuity;
+    CHECK(swap_rate(curve, start, Date(2028, 11, 19), 1, DayCount::Act360,
+                    Calendar(Calendar::Rules::WeekendsOnly)) ==
+          doctest::Approx(expected).epsilon(1e-15));
+}
+
+TEST_CASE("bootstrap: SOFR OIS discount factors match QuantLib") {
+    // Reference: QuantLib 1.44 PiecewiseLogLinearDiscount from DepositRateHelper (2 fixing days,
+    // US government bond calendar, modified following, ACT/360) and OISRateHelper(2, tenor,
+    // rate, overnight index on that calendar with ACT/360), whose defaults accrue each fixed
+    // period between modified-following adjusted dates. See tools/quantlib_crosscheck.py. The
+    // 2Y and 7Y pillars are where accrual dates fall on weekends.
+    const Calendar us = sofr_conventions().calendar;
+    const BootstrapResult r = bootstrap(kAsOf, sofr_quotes(), us);
+    const double tol = 1e-10;
+    CHECK(r.curve->discount(Date(2028, 11, 20)) == doctest::Approx(0.927933095786).epsilon(tol));
+    CHECK(r.curve->discount(Date(2033, 11, 21)) == doctest::Approx(0.766560565045).epsilon(tol));
+    CHECK(r.curve->discount(Date(2056, 11, 20)) == doctest::Approx(0.303079304576).epsilon(tol));
+    CHECK(r.curve->discount(Date(2030, 1, 15)) == doctest::Approx(0.890537861461).epsilon(tol));
+    CHECK(r.curve->discount(Date(2050, 2, 2)) == doctest::Approx(0.387922247178).epsilon(tol));
+}
+
 TEST_CASE("bootstrap: a single swap reprices and matches the closed form") {
     // One annual-pay 1Y swap: r = (1 - DF) / (tau * DF)  =>  DF = 1 / (1 + r * tau).
     const Quote q = make_quote(kAsOf, QuoteType::Swap, "1Y", 0.04, {});

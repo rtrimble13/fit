@@ -354,18 +354,20 @@ tenor  type     pillar        years  quote_pct  zero_cc_pct  discount  error_bp
 3M     deposit  2027-02-19   0.2575     4.2400       4.2782  0.989043  0.000000
 6M     deposit  2027-05-19   0.5014     4.1200       4.1373  0.979470  0.000000
 1Y     swap     2027-11-19   1.0055     3.9600       3.9390  0.961169  0.000000
-2Y     swap     2028-11-20   2.0110     3.7400       3.7144  0.928026  0.000000
+2Y     swap     2028-11-20   2.0110     3.7400       3.7194  0.927933  0.000000
 3Y     swap     2029-11-19   3.0082     3.6800       3.6596  0.895755  0.000000
 5Y     swap     2031-11-19   5.0082     3.7100       3.6920  0.831185  0.000000
-7Y     swap     2033-11-21   7.0164     3.8000       3.7860  0.766713  0.000000
-10Y    swap     2036-11-19  10.0137     3.9300       3.9330  0.674465  0.000000
-15Y    swap     2041-11-19  15.0164     4.0800       4.1070  0.539707  0.000000
-20Y    swap     2046-11-19  20.0192     4.1200       4.1487  0.435815  0.000000
-30Y    swap     2056-11-20  30.0301     4.0200       3.9748  0.303114  0.000000
+7Y     swap     2033-11-21   7.0164     3.8000       3.7888  0.766561  0.000000
+10Y    swap     2036-11-19  10.0137     3.9300       3.9329  0.674470  0.000000
+15Y    swap     2041-11-19  15.0164     4.0800       4.1070  0.539705  0.000000
+20Y    swap     2046-11-19  20.0192     4.1200       4.1488  0.435808  0.000000
+30Y    swap     2056-11-20  30.0301     4.0200       3.9752  0.303079  0.000000
 ```
 
 The start date is Thursday 19 November. The 1W deposit would mature on Thursday 26 November,
-which is Thanksgiving, so its pillar rolls to the 27th. Calendars available are `none`,
+which is Thanksgiving, so its pillar rolls to the 27th. Swap periods accrue between adjusted
+dates, as swaps do: the 2Y swap's second period ends on Sunday 19 November 2028, so it runs to
+Monday the 20th and accrues for 367 days. Calendars available are `none`,
 `weekends` (default) and `us`; `--holidays FILE` adds dates of your own (one ISO date per
 line) to any of them.
 

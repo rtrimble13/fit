@@ -61,8 +61,9 @@ if that falls inside a period, the first period is a **short stub** whose refere
 is the full regular period ending on the first coupon date. Without a dated date the
 schedule is regular.
 
-Accrual dates are never business-day adjusted. Payment dates are adjusted with the
-`following` convention on the chosen calendar.
+Bond accrual dates are never business-day adjusted. Payment dates are adjusted with the
+`following` convention on the chosen calendar. Swaps differ: their periods accrue between
+adjusted dates (section 4).
 
 ## 3. Yield curves
 
@@ -173,7 +174,7 @@ start date: the as-of date advanced by the spot lag (`--spot-lag`, or the row's
 | Type | Model-implied rate | Pillar date |
 |------|--------------------|-------------|
 | `deposit` | `(DF(S)/DF(E') - 1) / tau(S, E')`, `E'` = `E` adjusted modified-following | `E'` |
-| `swap` | `(DF(S) - DF(P_n)) / sum_i tau_i DF(P_i)` over the fixed schedule, payments adjusted modified-following | last payment |
+| `swap` | `(DF(S) - DF(P_n)) / sum_i tau_i DF(P_i)` over the fixed schedule. Each period accrues from the previous adjusted date (`S` for the first) to its own end adjusted modified-following, `P_i`, and is paid on `P_i`, as in ISDA swaps | last payment |
 | `par` | same formula over the coupon schedule, payments adjusted following; equivalent to a bond with that coupon pricing at 100 on `S` | last payment |
 | `zero` | `z(E)`; no spot lag | `E` |
 
@@ -348,6 +349,7 @@ Expected values in the test suite come from sources independent of this code bas
 | Price, yield, Macaulay and modified duration | published Microsoft Excel examples for `PRICE`, `YIELD`, `DURATION`, `MDURATION` | to the published digits |
 | Accrued, clean price, durations, convexity across day counts, frequencies, stubs and month-end schedules | QuantLib `BondFunctions` | `1e-9` relative |
 | Bootstrapped discount factors (`flat-forward`, `linear-zero`) at and between pillars | QuantLib `PiecewiseLogLinearDiscount`, `PiecewiseLinearZero` | `1e-9` |
+| Bootstrapped SOFR OIS discount factors (`swap` quotes, spot lag, US calendar) at and between pillars | QuantLib 1.44 `OISRateHelper` with default (modified-following, annual, ACT/360) conventions | `1e-10` |
 | Curve price with z-spread | QuantLib `ZeroSpreadedTermStructure` | `1e-8` |
 | Natural cubic and monotone cubic interpolation | SciPy `CubicSpline(bc_type="natural")`, `PchipInterpolator` | `1e-11` |
 | Monotone convex interpolation: forwards in every region, with uneven spacing and negative and mixed-sign rates | QuantLib 1.44 `ConvexMonotoneInterpolation` with quadraticity 0, monotonicity 1, `forcePositive` false (the published method); hand calculations for each region and for the positivity bounds | `1e-15` |

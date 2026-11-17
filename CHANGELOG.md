@@ -31,6 +31,21 @@ with the reason and the size of the effect.
 - `fit curve build` reports the extrapolation in its summary (`extrapolation` row/field). This
   is an additive output change, and no existing value changes.
 
+### Fixed
+
+- `swap` quotes accrue each fixed period between business-day adjusted dates, as ISDA swaps
+  do. Previously the periods ran between unadjusted dates, while payments were adjusted.
+  Bootstrapped SOFR discount factors now agree with QuantLib's `OISRateHelper` to 5e-13.
+  Before the fix they differed by up to 1.5e-4.
+
+### Numerical changes
+
+- Curves built from `swap` quotes change wherever a fixed-leg accrual date falls on a
+  non-business day. On `examples/data/usd_sofr.csv` (T+2, US calendar) the 2Y pillar zero rate
+  moves +0.50bp and the 7Y +0.28bp, and every other pillar by less than 0.04bp. A 10Y 4.25% bond
+  priced off that curve moves -0.0015 per 100. Curves without `swap` quotes, such as the example
+  Treasury curve, are unchanged. `par` quotes keep the bond convention of unadjusted accrual.
+
 ## [0.1.0] - 2026-11-17
 
 Initial MVP release.

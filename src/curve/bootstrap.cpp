@@ -146,14 +146,35 @@ double par_rate(const YieldCurve& curve, Date start, Date maturity, int frequenc
     return (curve.discount(start) - curve.discount(last_payment)) / annuity;
 }
 
+double swap_rate(const YieldCurve& curve, Date start, Date maturity, int frequency,
+                 DayCount day_count, const Calendar& calendar, BusinessDayConvention convention) {
+    ScheduleSpec spec;
+    spec.start = start;
+    spec.maturity = maturity;
+    spec.frequency = frequency;
+    spec.calendar = calendar;
+    spec.convention = convention;
+    // Each period accrues from the previous adjusted date (the start date for the first) to
+    // its own adjusted end, which is also its payment date.
+    double annuity = 0.0;
+    Date accrual_start = start;
+    for (const SchedulePeriod& p : make_schedule(spec)) {
+        const double accrual =
+            year_fraction(day_count, accrual_start, p.payment, p.ref_start, p.ref_end, frequency);
+        annuity += accrual * curve.discount(p.payment);
+        accrual_start = p.payment;
+    }
+    return (curve.discount(start) - curve.discount(accrual_start)) / annuity;
+}
+
 double implied_quote_rate(const Quote& quote, const YieldCurve& curve, const Calendar& calendar) {
     switch (quote.type) {
     case QuoteType::Deposit:
         return (curve.discount(quote.start) / curve.discount(quote.pillar) - 1.0) /
                year_fraction(quote.day_count, quote.start, quote.pillar);
     case QuoteType::Swap:
-        return par_rate(curve, quote.start, quote.maturity, quote.frequency, quote.day_count,
-                        calendar, BusinessDayConvention::ModifiedFollowing);
+        return swap_rate(curve, quote.start, quote.maturity, quote.frequency, quote.day_count,
+                         calendar, BusinessDayConvention::ModifiedFollowing);
     case QuoteType::Par:
         return par_rate(curve, quote.start, quote.maturity, quote.frequency, quote.day_count,
                         calendar, BusinessDayConvention::Following);

@@ -117,5 +117,19 @@ for (t,ten,r),n in zip(sq,nodes):
     ok = str(end.ISO()) == n["pillar"]
     failures += not ok
     print(("OK " if ok else "BAD"), "pillar", ten, n["pillar"], end.ISO())
+# OISRateHelper defaults: annual fixed leg on the index day count (ACT/360), periods accruing
+# between modified-following adjusted dates, no payment lag. An overnight index on the US
+# government bond calendar matches fit's `us` calendar.
+on=ql.OvernightIndex("SOFR-GB",0,ql.USDCurrency(),cal,ql.Actual360())
+ois=[]
+for t,ten,r in sq:
+    if t=="deposit":
+        ois.append(ql.DepositRateHelper(ql.QuoteHandle(ql.SimpleQuote(r/100)),ql.Period(ten),2,cal,ql.ModifiedFollowing,False,ql.Actual360()))
+    else:
+        ois.append(ql.OISRateHelper(2,ql.Period(ten),ql.QuoteHandle(ql.SimpleQuote(r/100)),on))
+sofr=ql.PiecewiseLogLinearDiscount(a,ois,ql.Actual365Fixed())
+for n in nodes: cmp("sofr df "+n["tenor"],n["discount"],sofr.discount(D(n["pillar"])),1e-9)
+q=fit("curve","query","--curve","examples/data/usd_sofr.csv","--asof",asof,"--spot-lag","2","--calendar","us","--dates","2027-08-03,2030-01-15,2041-06-30,2050-02-02")["curve"]
+for n in q: cmp("sofr interp df "+n["date"],n["discount"],sofr.discount(D(n["date"])),1e-9)
 print(f"{failures} failure(s)")
 sys.exit(1 if failures else 0)

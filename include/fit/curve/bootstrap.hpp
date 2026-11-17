@@ -56,10 +56,19 @@ std::vector<Quote> load_quotes(const std::string& path, Date as_of,
 /// The rate at which `quote`'s instrument prices to par on `curve` (same units as the quote).
 double implied_quote_rate(const Quote& quote, const YieldCurve& curve, const Calendar& calendar);
 
-/// Par coupon rate for a bond-like instrument from `start` to `maturity` on `curve`.
+/// Par coupon rate for a bond-like instrument from `start` to `maturity` on `curve`. Coupons
+/// accrue between unadjusted dates and are paid on adjusted ones, as bonds do.
 double par_rate(const YieldCurve& curve, Date start, Date maturity, int frequency,
                 DayCount day_count, const Calendar& calendar,
                 BusinessDayConvention convention = BusinessDayConvention::Following);
+
+/// Par fixed rate of a swap from `start` to `maturity` on `curve`, whose floating leg is worth
+/// DF(start) - DF(end) (an overnight-indexed swap on the same curve). Fixed periods accrue
+/// between business-day adjusted dates under `convention` and are paid at their adjusted end,
+/// as ISDA swaps do.
+double swap_rate(const YieldCurve& curve, Date start, Date maturity, int frequency,
+                 DayCount day_count, const Calendar& calendar,
+                 BusinessDayConvention convention = BusinessDayConvention::ModifiedFollowing);
 
 struct BootstrapOptions {
     InterpolationMethod method = InterpolationMethod::FlatForward;
