@@ -77,7 +77,7 @@ roadmap item where noted.
 | Curve construction | `swap` quotes assume an annual fixed leg and a single-curve floating leg | v0.2 |
 | Curve construction | Exact bootstrap only; no smoothing or parametric fit | v0.2 |
 | Interpolation | The default, `flat-forward`, has forwards that are discontinuous at nodes, and `cubic-zero` can oscillate; `monotone-convex` avoids both but is not yet the default | v0.2 |
-| Extrapolation | Outside the pillar range the zero rate (or, for the log-discount schemes, the last forward rate) is simply held flat | v0.2 |
+| Extrapolation | Beyond the last pillar the zero rate or the last forward is held flat, selectable with `--extrapolation`; no ultimate-forward-rate method | Not scheduled |
 | Curve construction | Swap and par-bond accrual periods use unadjusted dates; only payment dates are business-day adjusted | v0.2 |
 | Calendars | Only weekends-only, a rule-based US government bond calendar and user-supplied holiday files; the rule-based calendar knows only a handful of historical ad hoc market closures | v0.2 |
 | Instruments | Fixed-rate bullets and zeros only | v0.3 |
@@ -122,7 +122,7 @@ The following are outside the intended scope of `fit` and are not planned:
 | Multi-curve construction | Separate discount (OIS) and projection curves; dual-curve bootstrap of term-rate swaps; curve sets addressable by name |
 | Additional instruments for construction | Interest-rate futures with convexity adjustment, FRAs, swaps with explicit fixed/floating leg conventions, basis swaps |
 | Turn-of-year and jumps | Explicit jump pillars; step-function overlay for central-bank meeting dates |
-| Extrapolation choices | Flat forward and flat zero extrapolation, selectable and documented |
+| Extrapolation choices | Flat forward and flat zero extrapolation, selectable and documented. *Delivered: `--extrapolation` ([ADR 0015](adr/0015-selectable-extrapolation.md)).* |
 | Calendars | TARGET, UK, Japan and joint calendars; data-driven holiday tables with effective dates; calendar validation against published schedules |
 | Curve analytics | Par curve and forward curve output grids, curve differencing between two dates or two builds, rich/cheap residuals of bonds against a fitted curve |
 | Curve persistence | Save a built curve and reload it without re-bootstrapping |

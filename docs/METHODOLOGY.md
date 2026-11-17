@@ -73,7 +73,8 @@ date and `z` the continuously compounded zero rate, so
 DF(t) = exp(-z(t) t)
 ```
 
-**Interpolation** (`--interp`):
+**Interpolation** (`--interp`). The last column is each scheme's default extrapolation; see
+below for `--extrapolation`.
 
 | Scheme | Rule between nodes | Before first node | After last node |
 |--------|--------------------|-------------------|-----------------|
@@ -85,6 +86,21 @@ DF(t) = exp(-z(t) t)
 
 `monotone-cubic` preserves the monotonicity of `-ln DF`, so interpolated forward rates are
 non-negative wherever the node discount factors are non-increasing.
+
+**Extrapolation** (`--extrapolation`; decision in
+[ADR 0015](adr/0015-selectable-extrapolation.md)). Beyond the last pillar `t_n`, with zero rate
+`z_n` there:
+
+| Rule | Definition | Forward at `t_n` |
+|------|------------|------------------|
+| `flat-forward` | `-ln DF(t) = z_n t_n + f_n (t - t_n)`. On the `-ln DF` schemes `f_n` is the slope of the interpolant at `t_n`; on the zero-rate schemes `f_n = z_n + t_n z'(t_n)`, with `z'` the slope of the zero interpolant there | continuous |
+| `flat-zero` | `DF(t) = exp(-z_n t)` | jumps from `f_n` to `z_n` |
+
+Without the option, each scheme extrapolates as in the table above: `flat-zero` for
+`linear-zero` and `cubic-zero`, `flat-forward` for the others. `fit curve build` reports the
+rule in use. Before the first pillar the behaviour is fixed (see the table above) and does not
+depend on the option. The bootstrap solves the same nodes under either rule, because no
+instrument pays beyond its own pillar.
 
 **Monotone convex** (P. S. Hagan and G. West, "Interpolation methods for curve construction",
 *Applied Mathematical Finance* 13(2), 2006; "Methods for constructing a yield curve", *Wilmott
@@ -336,6 +352,8 @@ Expected values in the test suite come from sources independent of this code bas
 | Natural cubic and monotone cubic interpolation | SciPy `CubicSpline(bc_type="natural")`, `PchipInterpolator` | `1e-11` |
 | Monotone convex interpolation: forwards in every region, with uneven spacing and negative and mixed-sign rates | QuantLib 1.44 `ConvexMonotoneInterpolation` with quadraticity 0, monotonicity 1, `forcePositive` false (the published method); hand calculations for each region and for the positivity bounds | `1e-15` |
 | Bootstrapped `monotone-convex` discount factors at and between pillars | QuantLib 1.44 `PiecewiseConvexMonotoneForward` with `ConvexMonotone(0, 1, false)` | `1e-10` |
+| `flat-forward` extrapolation to 50 years: `flat-forward` and `linear-zero` curves | QuantLib 1.44 `PiecewiseLogLinearDiscount`, `PiecewiseLinearZero` with extrapolation enabled | `1e-10` |
+| `flat-zero` extrapolation and `flat-forward` on `cubic-zero` | hand calculation | `1e-14` |
 | US government bond calendar | QuantLib, every day 1990-2060 | exact |
 | Day counts | ISDA ACT/ACT examples | exact |
 

@@ -67,6 +67,7 @@ curve
 =====
 as_of                     2026-11-17
 interpolation           flat-forward
+extrapolation           flat-forward
 calendar                    weekends
 nodes                             11
 bootstrap_passes                   1
@@ -202,11 +203,12 @@ The spline is a global scheme: each pillar depends on all the others, so the boo
 repeatedly until everything reprices.
 
 ```console
-$ fit curve build --curve examples/data/usd_treasury.csv --asof 2026-11-17 --interp cubic-zero | head -8
+$ fit curve build --curve examples/data/usd_treasury.csv --asof 2026-11-17 --interp cubic-zero | head -9
 curve
 =====
 as_of                   2026-11-17
 interpolation           cubic-zero
+extrapolation            flat-zero
 calendar                  weekends
 nodes                           11
 bootstrap_passes                 5
@@ -221,11 +223,12 @@ scheme is local, since a quote affects forwards only on neighbouring intervals, 
 strictly local, so the bootstrap again takes a few sweeps:
 
 ```console
-$ fit curve build --curve examples/data/usd_treasury.csv --asof 2026-11-17 --interp monotone-convex | head -8
+$ fit curve build --curve examples/data/usd_treasury.csv --asof 2026-11-17 --interp monotone-convex | head -9
 curve
 =====
 as_of                        2026-11-17
 interpolation           monotone-convex
+extrapolation              flat-forward
 calendar                       weekends
 nodes                                11
 bootstrap_passes                      4
@@ -235,6 +238,46 @@ max_repricing_error_bp       0.00000000
 The default remains `flat-forward`. The method and its validation are described in
 [METHODOLOGY.md](../METHODOLOGY.md#3-yield-curves) and
 [ADR 0014](../adr/0014-monotone-convex-interpolation.md).
+
+### Beyond the last pillar
+
+Past the last quote, here the 30Y bond, the curve has to be extrapolated. `--extrapolation`
+picks the rule. `flat-zero` holds the last zero rate. `flat-forward` holds the instantaneous
+forward at the last pillar, so forwards stay continuous; QuantLib's curves use the same rule.
+Without the option, each scheme keeps its own rule: `flat-zero` for `linear-zero` and
+`cubic-zero`, and `flat-forward` for the others. `fit curve build` reports the rule in use.
+
+```console
+$ for e in flat-zero flat-forward; do echo "--- $e"; fit curve query --curve examples/data/usd_treasury.csv --asof 2026-11-17 --interp linear-zero --extrapolation $e --tenors 25Y,40Y,50Y --format csv | cut -d, -f1,4,7,8; done
+--- flat-zero
+tenor,zero_cc_pct,fwd_inst_pct,discount
+25Y,4.65295710856,4.35343268326,0.312233445935
+40Y,4.59302598108,4.59302598108,0.159060800669
+50Y,4.59302598108,4.59302598109,0.100444608483
+--- flat-forward
+tenor,zero_cc_pct,fwd_inst_pct,discount
+25Y,4.65295710856,4.35343268326,0.312233445935
+40Y,4.50317439458,4.2335704283,0.16488557933
+50Y,4.4492476964,4.23357042828,0.107936896773
+```
+
+The 25Y point lies inside the curve, so it does not depend on the rule. At 50 years the
+discount factors differ by 7.5% and the zero rates by 14bp. The choice reaches every cash
+flow past the last pillar, so it moves the price of a 40-year bond by about three quarters of a
+point:
+
+```console
+$ for e in flat-zero flat-forward; do echo "--- $e"; fit bond price --maturity 2066-11-15 --coupon 4.5 --curve examples/data/usd_treasury.csv --asof 2026-11-17 --interp linear-zero --extrapolation $e --format csv | grep -E '^(clean_price|zspread_bp),'; done
+--- flat-zero
+clean_price,98.3954340814
+zspread_bp,0
+--- flat-forward
+clean_price,99.13682833
+zspread_bp,0
+```
+
+Bonds that mature inside the curve, including their [horizon analysis](03-forecasting.md), do
+not depend on the rule.
 
 ## 5. Forward rates
 
@@ -296,6 +339,7 @@ curve
 =====
 as_of                     2026-11-17
 interpolation           flat-forward
+extrapolation           flat-forward
 calendar                          us
 nodes                             13
 bootstrap_passes                   1

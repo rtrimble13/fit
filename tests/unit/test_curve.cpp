@@ -158,6 +158,79 @@ TEST_CASE("curve: rate conversions") {
     CHECK_THROWS_AS(curve.discount(Date(2026, 11, 16)), Error);
 }
 
+TEST_CASE("curve: extrapolation names and each scheme's natural choice") {
+    CHECK(parse_extrapolation("flat-forward") == Extrapolation::FlatForward);
+    CHECK(parse_extrapolation("Flat-Zero") == Extrapolation::FlatZero);
+    CHECK(to_string(Extrapolation::FlatZero) == "flat-zero");
+    CHECK_THROWS_WITH(parse_extrapolation("sideways"),
+                      "unknown extrapolation 'sideways' (expected flat-forward or flat-zero)");
+    // ADR 0007: each scheme extrapolates in the quantity it interpolates.
+    CHECK(natural_extrapolation(InterpolationMethod::LinearZero) == Extrapolation::FlatZero);
+    CHECK(natural_extrapolation(InterpolationMethod::CubicZero) == Extrapolation::FlatZero);
+    CHECK(natural_extrapolation(InterpolationMethod::FlatForward) == Extrapolation::FlatForward);
+    CHECK(natural_extrapolation(InterpolationMethod::MonotoneCubic) == Extrapolation::FlatForward);
+    CHECK(natural_extrapolation(InterpolationMethod::MonotoneConvex) == Extrapolation::FlatForward);
+}
+
+TEST_CASE("curve: extrapolation beyond the last pillar under every scheme") {
+    const std::vector<double> times{1.0, 5.0, 10.0};
+    const std::vector<double> zeros{0.03, 0.04, 0.045};
+    for (const auto method : kAllMethods) {
+        CAPTURE(to_string(method));
+        const InterpolatedCurve natural(kAsOf, times, zeros, method);
+        const InterpolatedCurve flat_forward(kAsOf, times, zeros, method,
+                                             Extrapolation::FlatForward);
+        const InterpolatedCurve flat_zero(kAsOf, times, zeros, method, Extrapolation::FlatZero);
+        CHECK(natural.extrapolation() == natural_extrapolation(method));
+
+        // Inside the pillar range the choice changes nothing.
+        for (int k = 1; k <= 100; ++k) {
+            const double t = 0.1 * k;
+            CHECK(flat_forward.discount_t(t) ==
+                  doctest::Approx(natural.discount_t(t)).epsilon(1e-15));
+            CHECK(flat_zero.discount_t(t) == doctest::Approx(natural.discount_t(t)).epsilon(1e-15));
+        }
+        for (const double t : {10.5, 20.0, 50.0}) {
+            CAPTURE(t);
+            const InterpolatedCurve& same =
+                natural_extrapolation(method) == Extrapolation::FlatZero ? flat_zero : flat_forward;
+            CHECK(natural.discount_t(t) == doctest::Approx(same.discount_t(t)).epsilon(1e-15));
+            // flat-zero: the zero rate stays at the last pillar's.
+            CHECK(flat_zero.zero_rate_t(t) == doctest::Approx(0.045).epsilon(1e-14));
+            // flat-forward: the forward stays at its value at the last pillar.
+            CHECK(flat_forward.instantaneous_forward_t(t) ==
+                  doctest::Approx(flat_forward.instantaneous_forward_t(10.5)).epsilon(1e-10));
+        }
+        // flat-forward continues the forward from inside the curve, so it does not jump at the
+        // last pillar; flat-zero jumps from that forward to the zero rate, unless they coincide.
+        CHECK(std::fabs(forward_jump(flat_forward, 10.0, 1e-5)) < 1e-6);
+        CHECK(std::fabs(forward_jump(flat_zero, 10.0, 1e-5)) > 1e-3);
+    }
+
+    // Hand calculations. The last forward is z_n + t_n z'(t_n) on the zero-rate schemes, the
+    // slope of -ln DF at t_n on the others; -ln DF(20) = 0.45 + 10 f_n.
+    // linear-zero: z' = (4.5% - 4%) / 5 = 0.1%, so f_n = 5.5% and z(20) = (0.45 + 0.55) / 20.
+    const InterpolatedCurve linear(kAsOf, times, zeros, InterpolationMethod::LinearZero,
+                                   Extrapolation::FlatForward);
+    CHECK(linear.zero_rate_t(20.0) == doctest::Approx(0.05).epsilon(1e-14));
+    CHECK(linear.instantaneous_forward_t(20.0) == doctest::Approx(0.055).epsilon(1e-10));
+    // cubic-zero: natural spline with second derivative -0.0005 at t = 5 (from
+    // 18 m = 6 (0.1% - 0.25%)), end slope z' = 0.1% + 5 * (-0.0005) / 6, f_n = 4.5% + 10 z'.
+    const InterpolatedCurve cubic(kAsOf, times, zeros, InterpolationMethod::CubicZero,
+                                  Extrapolation::FlatForward);
+    const double cubic_forward = 0.045 + 10.0 * (0.001 - 5.0 * 0.0005 / 6.0);
+    CHECK(cubic.zero_rate_t(20.0) ==
+          doctest::Approx((0.45 + 10.0 * cubic_forward) / 20.0).epsilon(1e-14));
+    // flat-forward interpolation: the last discrete forward (0.45 - 0.20) / 5 = 5%.
+    const InterpolatedCurve flat(kAsOf, times, zeros, InterpolationMethod::FlatForward);
+    CHECK(flat.zero_rate_t(20.0) == doctest::Approx((0.45 + 0.5) / 20.0).epsilon(1e-14));
+
+    // A single pillar: linear-zero has no slope, so both choices give the same flat curve.
+    const InterpolatedCurve one(kAsOf, {2.0}, {0.04}, InterpolationMethod::LinearZero,
+                                Extrapolation::FlatForward);
+    CHECK(one.zero_rate_t(9.0) == doctest::Approx(0.04).epsilon(1e-14));
+}
+
 TEST_CASE("curve: invalid nodes are rejected") {
     CHECK_THROWS_AS(InterpolatedCurve(kAsOf, {}, {}, InterpolationMethod::LinearZero), Error);
     CHECK_THROWS_AS(
@@ -294,6 +367,46 @@ TEST_CASE("bootstrap: discount factors match QuantLib") {
     CHECK(linear.curve->discount(Date(2046, 11, 19)) ==
           doctest::Approx(0.3892779025).epsilon(1e-9));
     CHECK(linear.curve->discount(Date(2050, 2, 2)) == doctest::Approx(0.3376531048).epsilon(1e-9));
+}
+
+TEST_CASE("bootstrap: extrapolation matches QuantLib beyond the last pillar") {
+    // Reference: QuantLib 1.44 PiecewiseLogLinearDiscount and PiecewiseLinearZero, built from the
+    // helpers in tools/quantlib_crosscheck.py with extrapolation enabled. Both hold the
+    // instantaneous forward at the last pillar (InterpolatedZeroCurve uses z + t z'(t)); the
+    // last pillar is 2056-11-17.
+    const double tol = 1e-10;
+    const BootstrapResult flat =
+        bootstrap(kAsOf, treasury_quotes(), Calendar(), {InterpolationMethod::FlatForward});
+    CHECK(flat.curve->extrapolation() == Extrapolation::FlatForward);
+    CHECK(flat.curve->discount(Date(2060, 1, 1)) == doctest::Approx(0.220397818657).epsilon(tol));
+    CHECK(flat.curve->discount(Date(2076, 11, 17)) == doctest::Approx(0.105473330396).epsilon(tol));
+
+    BootstrapOptions options{InterpolationMethod::LinearZero};
+    options.extrapolation = Extrapolation::FlatForward;
+    const BootstrapResult linear = bootstrap(kAsOf, treasury_quotes(), Calendar(), options);
+    CHECK(linear.curve->extrapolation() == Extrapolation::FlatForward);
+    CHECK(linear.curve->discount(Date(2060, 1, 1)) == doctest::Approx(0.220658048373).epsilon(tol));
+    CHECK(linear.curve->discount(Date(2076, 11, 17)) ==
+          doctest::Approx(0.107936896773).epsilon(tol));
+}
+
+TEST_CASE("bootstrap: the extrapolation choice does not move the nodes") {
+    // No bootstrap instrument pays beyond its own pillar, so the solved nodes are the same.
+    for (const auto method : kAllMethods) {
+        CAPTURE(to_string(method));
+        const BootstrapResult natural = bootstrap(kAsOf, treasury_quotes(), Calendar(), {method});
+        for (const auto extrapolation : {Extrapolation::FlatForward, Extrapolation::FlatZero}) {
+            BootstrapOptions options{method};
+            options.extrapolation = extrapolation;
+            const BootstrapResult r = bootstrap(kAsOf, treasury_quotes(), Calendar(), options);
+            CHECK(r.curve->extrapolation() == extrapolation);
+            CHECK(r.passes == natural.passes);
+            for (std::size_t i = 0; i < r.quotes.size(); ++i) {
+                CHECK(r.curve->zero_rates()[i] ==
+                      doctest::Approx(natural.curve->zero_rates()[i]).epsilon(1e-15));
+            }
+        }
+    }
 }
 
 TEST_CASE("bootstrap: quote conventions") {

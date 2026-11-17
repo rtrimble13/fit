@@ -18,8 +18,9 @@ constexpr double kMaxZero = 2.0;
 
 std::shared_ptr<const InterpolatedCurve> build(Date as_of, const std::vector<double>& times,
                                                const std::vector<double>& zeros,
-                                               InterpolationMethod method) {
-    return std::make_shared<InterpolatedCurve>(as_of, times, zeros, method);
+                                               InterpolationMethod method,
+                                               Extrapolation extrapolation) {
+    return std::make_shared<InterpolatedCurve>(as_of, times, zeros, method, extrapolation);
 }
 
 } // namespace
@@ -191,6 +192,8 @@ BootstrapResult bootstrap(Date as_of, std::vector<Quote> quotes, const Calendar&
         return worst;
     };
 
+    const Extrapolation extrapolation =
+        options.extrapolation.value_or(natural_extrapolation(options.method));
     BootstrapResult result;
     result.implied.resize(quotes.size());
     for (int pass = 1; pass <= options.max_passes; ++pass) {
@@ -205,7 +208,7 @@ BootstrapResult bootstrap(Date as_of, std::vector<Quote> quotes, const Calendar&
                         trial[j] = z;
                     }
                 }
-                const InterpolatedCurve curve(as_of, times, trial, options.method);
+                const InterpolatedCurve curve(as_of, times, trial, options.method, extrapolation);
                 return implied_quote_rate(quotes[i], curve, calendar) - quotes[i].rate;
             };
             zeros[i] = solve_near(objective, zeros[i], 0.01, kMinZero, kMaxZero,
@@ -213,7 +216,7 @@ BootstrapResult bootstrap(Date as_of, std::vector<Quote> quotes, const Calendar&
                                   {.tolerance = 1e-15, .max_iterations = 200});
         }
         result.passes = pass;
-        result.curve = build(as_of, times, zeros, options.method);
+        result.curve = build(as_of, times, zeros, options.method, extrapolation);
         result.max_error = max_error(*result.curve, &result.implied);
         if (result.max_error <= options.tolerance) {
             result.quotes = std::move(quotes);

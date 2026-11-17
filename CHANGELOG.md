@@ -22,6 +22,14 @@ with the reason and the size of the effect.
   and against hand calculations. See
   [ADR 0014](docs/adr/0014-monotone-convex-interpolation.md). The default interpolation is
   still `flat-forward`, and no existing output changes.
+- `--extrapolation flat-forward|flat-zero` on every command that builds a curve, choosing how
+  the curve continues beyond its last pillar. `flat-forward` holds the instantaneous forward at
+  the last pillar, as QuantLib's interpolated curves do. `flat-zero` holds the last zero rate.
+  The default keeps each scheme's existing behaviour: `flat-zero` for `linear-zero` and
+  `cubic-zero`, `flat-forward` otherwise. Validated against QuantLib 1.44 out to 50 years. See
+  [ADR 0015](docs/adr/0015-selectable-extrapolation.md).
+- `fit curve build` reports the extrapolation in its summary (`extrapolation` row/field). This
+  is an additive output change, and no existing value changes.
 
 ## [0.1.0] - 2026-11-17
 

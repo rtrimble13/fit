@@ -14,6 +14,9 @@ so the two curves legitimately differ between pillars.
 The monotone-convex scheme is compared with QuantLib's ConvexMonotone(0, 1, false), which is
 the published Hagan-West method (ADR 0014), and only inside the pillar range: beyond the last
 pillar QuantLib holds the last discrete forward, fit the last instantaneous forward.
+
+Beyond the last pillar, flat-forward extrapolation (ADR 0015) is compared for the flat-forward
+and linear-zero curves, whose QuantLib counterparts hold the instantaneous forward there.
 """
 import json
 import subprocess
@@ -96,6 +99,13 @@ for interp,make in curves:
     npv=sum(cf.amount()*zs.discount(cf.date()) for cf in b.cashflows() if cf.date()>s)/zs.discount(s)
     r=fit("bond","price","--maturity","2036-11-15","--coupon","4.25","--settle","2026-11-18","--curve","examples/data/usd_treasury.csv","--asof",asof,"--interp",interp,"--zspread","75")["bond"]
     cmp("curve dirty z=75",r["dirty_price"],npv,1e-8)
+# extrapolation beyond the last pillar (2056-11-17): QuantLib holds the instantaneous forward
+print("extrapolation")
+beyond="2057-03-31,2060-01-01,2066-11-17,2076-11-17"
+for interp,cls in [("flat-forward",ql.PiecewiseLogLinearDiscount),("linear-zero",ql.PiecewiseLinearZero)]:
+    c=cls(a,hs,ql.Actual365Fixed()); c.enableExtrapolation()
+    q=fit("curve","query","--curve","examples/data/usd_treasury.csv","--asof",asof,"--interp",interp,"--extrapolation","flat-forward","--dates",beyond)["curve"]
+    for n in q: cmp(interp+" extrap df "+n["date"],n["discount"],c.discount(D(n["date"])),1e-9)
 # OIS swaps
 print("sofr")
 cal=ql.UnitedStates(ql.UnitedStates.GovernmentBond)

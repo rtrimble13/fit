@@ -79,6 +79,17 @@ for interp in linear-zero flat-forward cubic-zero monotone-cubic monotone-convex
 done
 expect_exit 1 curve build "${CURVE[@]}" --interp wobbly
 expect_err "unknown interpolation .wobbly. .*monotone-convex"; expect_no_out
+# Extrapolation: each scheme's natural choice by default, either one on request.
+expect_exit 0 curve build "${CURVE[@]}";                      expect_out '^extrapolation +flat-forward$'
+expect_exit 0 curve build "${CURVE[@]}" --interp linear-zero; expect_out '^extrapolation +flat-zero$'
+expect_exit 0 curve build "${CURVE[@]}" --extrapolation flat-zero --format json
+expect_out '"extrapolation": "flat-zero"'
+expect_exit 0 curve query "${CURVE[@]}" --extrapolation flat-zero --tenors 30Y,50Y --format csv
+expect_out '^30Y,2056-11-17,30\.0[0-9]*,4\.58346231'   # the 30Y pillar's zero rate...
+expect_out '^50Y,2076-11-17,50\.0[0-9]*,4\.58346231'   # ...held flat to 50Y
+expect_exit 1 curve build "${CURVE[@]}" --extrapolation sideways
+expect_err "unknown extrapolation 'sideways' \(expected flat-forward or flat-zero\)"; expect_no_out
+expect_exit 0 curve build --help;                             expect_out '--extrapolation METHOD'
 expect_exit 0 curve query "${CURVE[@]}" --tenors 2Y,10Y
 expect_out '^2Y +2028-11-17 .* 3\.9000 '   # par rate of a pillar is its quote
 expect_exit 0 curve query "${CURVE[@]}" --tenors 5Y --horizon 1Y

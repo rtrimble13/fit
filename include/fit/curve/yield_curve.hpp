@@ -23,6 +23,19 @@ enum class InterpolationMethod {
 InterpolationMethod parse_interpolation_method(std::string_view text);
 std::string to_string(InterpolationMethod method);
 
+/// How a curve continues beyond its last pillar (ADR 0015). Before the first pillar every
+/// scheme behaves as ADR 0007 describes, whatever the extrapolation.
+enum class Extrapolation {
+    FlatForward, ///< hold the instantaneous forward at the last pillar
+    FlatZero     ///< hold the zero rate at the last pillar
+};
+
+Extrapolation parse_extrapolation(std::string_view text);
+std::string to_string(Extrapolation extrapolation);
+/// Each scheme's own extrapolation (ADR 0007): flat-zero for the zero-rate schemes
+/// (linear-zero, cubic-zero), flat-forward for the schemes on -ln DF.
+Extrapolation natural_extrapolation(InterpolationMethod method);
+
 /// A piecewise-linear zero-rate spread as a function of time, flat outside its nodes.
 /// A single node describes a parallel shift. Values are decimals (0.0001 == 1bp).
 class ZeroShift {
@@ -84,7 +97,10 @@ using CurvePtr = std::shared_ptr<const YieldCurve>;
 class InterpolatedCurve final : public YieldCurve {
 public:
     /// `times` are strictly increasing positive ACT/365F year fractions; `zero_rates` are
-    /// continuously compounded.
+    /// continuously compounded. Beyond the last pillar the curve extrapolates as `extrapolation`
+    /// says; the four-argument form uses the scheme's natural extrapolation.
+    InterpolatedCurve(Date as_of, std::vector<double> times, std::vector<double> zero_rates,
+                      InterpolationMethod method, Extrapolation extrapolation);
     InterpolatedCurve(Date as_of, std::vector<double> times, std::vector<double> zero_rates,
                       InterpolationMethod method);
 
@@ -93,13 +109,16 @@ public:
     const std::vector<double>& times() const { return times_; }
     const std::vector<double>& zero_rates() const { return zero_rates_; }
     InterpolationMethod method() const { return method_; }
+    Extrapolation extrapolation() const { return extrapolation_; }
 
 private:
     std::vector<double> times_;
     std::vector<double> zero_rates_;
     InterpolationMethod method_;
+    Extrapolation extrapolation_;
     std::optional<Interpolation> interpolation_;
     std::optional<MonotoneConvex> monotone_convex_;
+    double last_forward_ = 0.0; ///< instantaneous forward at the last pillar, from the left
 };
 
 /// `base` with a zero-rate shift added: DF'(t) = DF(t) * exp(-shift(t) * t).

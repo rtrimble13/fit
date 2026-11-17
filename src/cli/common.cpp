@@ -16,6 +16,10 @@ std::vector<OptionSpec> curve_options(bool required) {
         {"interp", "METHOD",
          "linear-zero | flat-forward | cubic-zero | monotone-cubic | monotone-convex",
          "flat-forward", false},
+        {"extrapolation", "METHOD",
+         "beyond the last pillar: flat-forward | flat-zero (default: flat-zero for linear-zero "
+         "and cubic-zero, flat-forward otherwise)",
+         "", false},
         {"calendar", "NAME", "business-day calendar: none | weekends | us", "weekends", false},
         {"holidays", "FILE", "extra holidays, one ISO date per line", "", false},
         {"spot-lag", "DAYS", "business days from as-of to quote start dates", "0", false},
@@ -66,6 +70,9 @@ Market load_market(const Args& args) {
     require(conventions.settle_days >= 0, "--spot-lag must be non-negative");
     BootstrapOptions options;
     options.method = parse_interpolation_method(args.require("interp"));
+    if (const auto extrapolation = args.get("extrapolation")) {
+        options.extrapolation = parse_extrapolation(*extrapolation);
+    }
     m.bootstrap = bootstrap(m.as_of, load_quotes(args.require("curve"), m.as_of, conventions),
                             m.calendar, options);
     m.curve = m.bootstrap.curve;

@@ -62,6 +62,34 @@ std::string to_string(InterpolationMethod method) {
     return "";
 }
 
+Extrapolation parse_extrapolation(std::string_view text) {
+    std::string t(text);
+    std::transform(t.begin(), t.end(), t.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (t == "flat-forward") {
+        return Extrapolation::FlatForward;
+    }
+    if (t == "flat-zero") {
+        return Extrapolation::FlatZero;
+    }
+    throw Error("unknown extrapolation '" + std::string(text) +
+                "' (expected flat-forward or flat-zero)");
+}
+
+std::string to_string(Extrapolation extrapolation) {
+    switch (extrapolation) {
+    case Extrapolation::FlatForward:
+        return "flat-forward";
+    case Extrapolation::FlatZero:
+        return "flat-zero";
+    }
+    return "";
+}
+
+Extrapolation natural_extrapolation(InterpolationMethod method) {
+    return interpolates_log_discount(method) ? Extrapolation::FlatForward : Extrapolation::FlatZero;
+}
+
 // ---------------------------------------------------------------------------------------------
 // ZeroShift
 
@@ -161,10 +189,17 @@ double YieldCurve::instantaneous_forward_t(double t) const {
 
 InterpolatedCurve::InterpolatedCurve(Date as_of, std::vector<double> times,
                                      std::vector<double> zero_rates, InterpolationMethod method)
+    : InterpolatedCurve(as_of, std::move(times), std::move(zero_rates), method,
+                        natural_extrapolation(method)) {}
+
+InterpolatedCurve::InterpolatedCurve(Date as_of, std::vector<double> times,
+                                     std::vector<double> zero_rates, InterpolationMethod method,
+                                     Extrapolation extrapolation)
     : YieldCurve(as_of),
       times_(std::move(times)),
       zero_rates_(std::move(zero_rates)),
-      method_(method) {
+      method_(method),
+      extrapolation_(extrapolation) {
     require(!times_.empty(), "curve: at least one node is required");
     require(times_.size() == zero_rates_.size(), "curve: node times and rates differ in size");
     require(times_.front() > 0.0, "curve: node times must be positive");
@@ -192,12 +227,35 @@ InterpolatedCurve::InterpolatedCurve(Date as_of, std::vector<double> times,
                              ? Interpolation::linear(times_, zero_rates_)
                              : Interpolation::natural_cubic(times_, zero_rates_);
     }
+
+    // The instantaneous forward at the last pillar, approached from inside the curve: the
+    // slope of -ln DF there. For the zero-rate schemes that is z + t z'(t).
+    // A zero-rate scheme with one pillar has no interpolant and a flat zero curve (slope 0).
+    const double t_last = times_.back();
+    if (monotone_convex_) {
+        last_forward_ = monotone_convex_->derivative(t_last);
+    } else if (!interpolates_log_discount(method_)) {
+        const double slope = interpolation_ ? interpolation_->derivative(t_last) : 0.0;
+        last_forward_ = zero_rates_.back() + t_last * slope;
+    } else if (interpolation_) {
+        last_forward_ = interpolation_->derivative(t_last);
+    }
 }
 
 double InterpolatedCurve::discount_t(double t) const {
     require(t >= 0.0, "curve: negative time");
     if (t == 0.0) {
         return 1.0;
+    }
+    const double t_last = times_.back();
+    if (t > t_last && extrapolation_ != natural_extrapolation(method_)) {
+        // The scheme's other extrapolation; its natural one is the interpolant's own extension
+        // below.
+        const double z_last = zero_rates_.back();
+        if (extrapolation_ == Extrapolation::FlatZero) {
+            return std::exp(-z_last * t);
+        }
+        return std::exp(-(z_last * t_last + last_forward_ * (t - t_last)));
     }
     if (interpolates_log_discount(method_)) {
         // Beyond the last node the interpolant continues linearly: flat forward extrapolation.

@@ -33,7 +33,7 @@ std::vector<Command> portfolio_commands();
 
 // ---- Shared option groups and their loaders ----------------------------------------------------
 
-/// `--curve --asof --interp --calendar --holidays --spot-lag`.
+/// `--curve --asof --interp --extrapolation --calendar --holidays --spot-lag`.
 std::vector<OptionSpec> curve_options(bool required);
 /// `--maturity --coupon --frequency --daycount --issue --settle --settle-days --no-eom`.
 std::vector<OptionSpec> bond_options();

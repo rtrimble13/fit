@@ -16,6 +16,7 @@ void curve_build(const Args& args, Report& report) {
     Table& summary = report.add(Table::key_value("curve"));
     summary.add("as_of", m.as_of.to_string());
     summary.add("interpolation", to_string(b.curve->method()));
+    summary.add("extrapolation", to_string(b.curve->extrapolation()));
     summary.add("calendar", m.calendar.name());
     summary.add("nodes", static_cast<double>(b.quotes.size()), 0);
     summary.add("bootstrap_passes", b.passes, 0);

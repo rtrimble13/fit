@@ -6,6 +6,7 @@
 #include "fit/time/daycount.hpp"
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -64,6 +65,9 @@ struct BootstrapOptions {
     InterpolationMethod method = InterpolationMethod::FlatForward;
     double tolerance = 1e-12; ///< maximum absolute repricing error (decimal rate)
     int max_passes = 100;
+    /// Beyond the last pillar; empty means the scheme's natural extrapolation. Bootstrap
+    /// instruments never pay beyond their own pillar, so this does not change the nodes.
+    std::optional<Extrapolation> extrapolation = std::nullopt;
 };
 
 struct BootstrapResult {
