@@ -55,8 +55,9 @@ public:
     /// Accrued interest at `settle`.
     double accrued(Date settle) const;
 
-    /// Index of the first cashflow paid strictly after `settle`; throws when the bond has
-    /// matured.
+    /// Index of the first cashflow belonging to a buyer settling on `settle`: the first
+    /// whose nominal (unadjusted) coupon date is after `settle`. Ownership follows nominal
+    /// dates; discounting uses the adjusted payment dates. Throws when the bond has matured.
     std::size_t first_cashflow_after(Date settle) const;
 
 private:

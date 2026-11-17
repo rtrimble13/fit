@@ -233,7 +233,7 @@ Option groups shared across commands:
 | Scenarios | `--shifts LIST` e.g. `-50,0,50` or twists `2Y:-25/10Y:25` |
 | Output | `--format table\|csv\|json` `--precision N` |
 
-A list beginning with a minus sign must be attached with `=`, as in `--shifts=-50,0,50`.
+Negative values are accepted as written (`--shifts -50,0,50`); `--shifts=-50,0,50` works too.
 
 ## Input files
 
@@ -289,6 +289,8 @@ CORP-A-2032,6000000,2032-03-15,5.100,2,30/360,,85
 
 Defaults a desk should know (all are in [METHODOLOGY.md](docs/METHODOLOGY.md)):
 
+- A buyer receives the coupons whose nominal date is after settlement; each is discounted
+  from its business-day adjusted payment date.
 - Bond settlement is T+1 business day from `--asof` unless `--settle` or `--settle-days` is
   given. Portfolio and pre-trade valuation settle on the as-of date unless `--settle` is given.
 - Yield is street convention, compounded at the coupon frequency.

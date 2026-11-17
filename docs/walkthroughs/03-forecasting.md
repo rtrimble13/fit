@@ -95,8 +95,7 @@ than rolling one-year paper is a bet that rates rise by less than the forwards i
 ## 4. Rate scenarios
 
 `--shifts` applies parallel shocks, in basis points, to the horizon curve. Several can be
-listed. (Write `--shifts=-50,...` with an equals sign, or put a non-negative value first, so
-that a leading minus is not mistaken for an option.)
+listed.
 
 ```console
 $ fit bond forecast --maturity 2036-11-15 --coupon 4.25 --curve examples/data/usd_treasury.csv --asof 2026-11-17 --price 99.9375 --horizon 1Y --shifts=-100,-50,-25,0,25,50,100 | tail -9

@@ -150,7 +150,9 @@ the period in the bond's day count (so `c/f` for a regular period under `act/act
 AI = 100 c tau(a, s)
 ```
 
-A cashflow belongs to the buyer when its payment date is after the settlement date.
+A cashflow belongs to the buyer when its nominal (unadjusted) coupon date is after the
+settlement date. Ownership follows nominal dates everywhere; curve discounting uses the
+adjusted payment dates.
 
 ### 5.1 Yield (street convention)
 
@@ -180,7 +182,7 @@ where `PV_i = CF_i (1 + y/f)^(-f T_i)` and `P` is the dirty price.
 P_dirty(z) = sum_i CF_i  DF(p_i)/DF(s)  exp(-z (t_i - t_s))
 ```
 
-over cashflows with payment date `p_i` after settlement `s`. Discounting runs from the
+over the buyer's cashflows, each discounted from its payment date `p_i`. Discounting runs from the
 settlement date. The **z-spread** `z` is a constant spread on continuously compounded
 ACT/365F zero rates; given a price it is solved by root-finding. Note that it is *not*
 quoted with the bond's compounding: a z-spread of `z` continuous corresponds to roughly
@@ -213,9 +215,9 @@ mark, a base scenario and a shock. Everything is per 100 face.
    as-of and settlement dates. Under `unchanged` it is today's curve re-based to that date;
    under `forward` it is the forward-implied curve. The shock is then added as a zero-rate
    shift.
-3. **Horizon price.** `P_h` is the curve price of the cashflows paid after `h`, at the same
+3. **Horizon price.** `P_h` is the curve price of the cashflows falling due after `h`, at the same
    `z`. `P_h_base` is the same without the shock.
-4. **Coupons.** Cashflows paid after `s` and on or before `h` total `C`. Each is reinvested
+4. **Coupons.** Cashflows with a nominal date after `s` and on or before `h` total `C`. Each is reinvested
    from its payment date `p` to `h`: by default at today's forwards, growth
    `DF(p)/DF(h)`; with `--reinvest r`, growth `(1 + r/f)^(f (h - p)/365)`. `R` is the
    total interest earned.

@@ -143,6 +143,21 @@ TEST_CASE("bond: cashflows and payment-date adjustment") {
     CHECK_THROWS_AS(bond.first_cashflow_after(Date(2028, 11, 15)), Error);
 }
 
+TEST_CASE("bond: yield and curve pricing agree on which cashflows remain") {
+    // The 15 May 2027 coupon date is a Saturday, paid on Monday the 17th. A buyer settling
+    // on the Sunday in between does not receive it, under either pricing route.
+    const Bond bond = make_bond({}, Date(2029, 11, 15), 4.25, 2, DayCount::ActActICMA,
+                                Calendar(Calendar::Rules::WeekendsOnly));
+    const Date sunday(2027, 5, 16);
+    const CurvePtr curve = flat_curve(kAsOf, 0.04);
+    CHECK(bond.cashflows()[bond.first_cashflow_after(sunday)].payment == Date(2027, 11, 15));
+    const BondValuation v = value_bond(bond, sunday, Mark::curve(), curve.get());
+    // Semi-annual equivalent of a 4% continuous rate is 4.04%; a wrong cashflow set would
+    // put the yield far from the curve.
+    CHECK(v.yield == doctest::Approx(0.0404).epsilon(2e-3));
+    CHECK(v.accrued == doctest::Approx(100.0 * 0.0425 * 1.0 / (2.0 * 184.0)).epsilon(1e-12));
+}
+
 TEST_CASE("bond: z-spread round trip and consistency of marks") {
     const CurvePtr curve = std::make_shared<InterpolatedCurve>(
         kAsOf, std::vector<double>{1.0, 5.0, 10.0, 30.0},

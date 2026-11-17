@@ -59,11 +59,12 @@ HorizonResult horizon_analysis(const Bond& bond, Date settle, const Mark& mark,
     r.clean_end = r.dirty_end - r.accrued_end;
     r.yield_end = yield_from_dirty_price(bond, spec.horizon, r.dirty_end);
 
-    // Coupons paid after settlement up to and including the horizon, reinvested to it.
+    // Coupons falling due after settlement up to and including the horizon, reinvested from
+    // their payment date to the horizon.
     const int f = bond.spec().frequency;
     for (std::size_t i = bond.first_cashflow_after(settle); i < bond.cashflows().size(); ++i) {
         const Cashflow& cf = bond.cashflows()[i];
-        if (cf.payment > spec.horizon) {
+        if (cf.accrual_end > spec.horizon) {
             break;
         }
         double growth;

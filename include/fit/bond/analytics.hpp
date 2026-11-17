@@ -32,7 +32,8 @@ YieldRisk yield_risk(const Bond& bond, Date settle, double yield);
 
 // ---- Curve-based analytics ---------------------------------------------------------------------
 //
-// Cashflows are discounted on the curve from the settlement date, plus a continuously
+// Cashflows with a nominal coupon date after settlement are discounted on the curve, from
+// their payment dates back to the settlement date, plus a continuously
 // compounded z-spread: PV = sum CF_i * DF(t_i) / DF(t_s) * exp(-z * (t_i - t_s)).
 
 double dirty_price_from_curve(const Bond& bond, Date settle, const YieldCurve& curve,

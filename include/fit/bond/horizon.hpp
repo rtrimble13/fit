@@ -41,7 +41,7 @@ struct HorizonResult {
     double dirty_end = 0.0;
     double yield_end = 0.0;
 
-    double coupons = 0.0; ///< coupons paid in (settle, horizon]
+    double coupons = 0.0; ///< coupons with nominal date in (settle, horizon]
 
     // P&L attribution; the four components sum to `total_pnl`.
     double coupon_income = 0.0; ///< coupons received plus change in accrued interest

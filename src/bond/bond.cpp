@@ -61,7 +61,7 @@ Date Bond::settlement_date(Date trade_date) const {
 
 std::size_t Bond::first_cashflow_after(Date settle) const {
     for (std::size_t i = 0; i < cashflows_.size(); ++i) {
-        if (cashflows_[i].payment > settle) {
+        if (cashflows_[i].accrual_end > settle) {
             return i;
         }
     }
