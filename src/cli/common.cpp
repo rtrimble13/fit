@@ -13,7 +13,8 @@ std::vector<OptionSpec> curve_options(bool required) {
     return {
         {"curve", "FILE", "market quotes CSV (columns: type,tenor,rate)", "", required},
         {"asof", "DATE", "curve / valuation date (YYYY-MM-DD)", "", required},
-        {"interp", "METHOD", "linear-zero | flat-forward | cubic-zero | monotone-cubic",
+        {"interp", "METHOD",
+         "linear-zero | flat-forward | cubic-zero | monotone-cubic | monotone-convex",
          "flat-forward", false},
         {"calendar", "NAME", "business-day calendar: none | weekends | us", "weekends", false},
         {"holidays", "FILE", "extra holidays, one ISO date per line", "", false},

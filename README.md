@@ -46,7 +46,7 @@ bullet and zero-coupon bonds, single-curve bootstrapping) and done carefully. Se
 
 | Area | Capabilities |
 |------|--------------|
-| **Yield curves** | Bootstrap a zero curve from deposits, swaps, par bond yields and zero rates. Four interpolation schemes (`flat-forward`, `linear-zero`, `cubic-zero`, `monotone-cubic`). Exact repricing of every input, reported per instrument. Zero, par, forward and instantaneous forward rates at any tenor or date; forward strips; forward-implied future curves. |
+| **Yield curves** | Bootstrap a zero curve from deposits, swaps, par bond yields and zero rates. Five interpolation schemes (`flat-forward`, `linear-zero`, `cubic-zero`, `monotone-cubic`, and Hagan-West `monotone-convex` for continuous, positive forwards). Exact repricing of every input, reported per instrument. Zero, par, forward and instantaneous forward rates at any tenor or date; forward strips; forward-implied future curves. |
 | **Bond valuation** | Price from yield, yield from price, price off a curve with a z-spread, implied z-spread from a price. Accrued interest, clean and dirty prices, cashflow schedules with discount factors. Six day-count conventions, short first coupons, month-end rolls, business-day adjusted payments. |
 | **Risk** | Macaulay and modified duration, convexity, DV01. Effective duration and convexity and key-rate DV01s by bump-and-reprice on a user-defined tenor ladder. |
 | **Forecasting** | Horizon analysis: projected price and total return to any horizon under an unchanged curve or realised forwards, with parallel shocks and curve twists. Return attribution into coupon income, roll-down, curve move and reinvestment. |
@@ -226,7 +226,7 @@ Option groups shared across commands:
 
 | Group | Options |
 |-------|---------|
-| Curve | `--curve FILE` `--asof DATE` `--interp flat-forward\|linear-zero\|cubic-zero\|monotone-cubic` `--calendar none\|weekends\|us` `--holidays FILE` `--spot-lag DAYS` |
+| Curve | `--curve FILE` `--asof DATE` `--interp flat-forward\|linear-zero\|cubic-zero\|monotone-cubic\|monotone-convex` `--calendar none\|weekends\|us` `--holidays FILE` `--spot-lag DAYS` |
 | Bond | `--maturity DATE` `--coupon PCT` `--frequency 1\|2\|4\|12` `--daycount DC` `--issue DATE` `--settle DATE` `--settle-days N` `--no-eom` |
 | Mark | one of `--price PX` (clean), `--yield PCT`, `--zspread BP`; none means "on the curve, no spread" |
 | Risk | `--key-tenors LIST` `--bump-bp BP` |
@@ -333,6 +333,8 @@ Numerical output is tested against sources independent of this code:
   frequencies and stub periods, for bootstrapped discount factors, and for z-spread pricing,
   agreeing to `1e-9` or better;
 - SciPy, for the cubic and monotone cubic interpolators;
+- QuantLib's convex monotone interpolation and bootstrap, set to the published Hagan-West
+  method, and hand calculations, for the monotone convex interpolator;
 - QuantLib's US government bond calendar, day for day from 1990 to 2060;
 - exact identities: every curve reprices its inputs, price and yield round-trip, key-rate
   DV01s sum to the parallel DV01, and horizon P&L components sum to the total.

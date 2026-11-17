@@ -11,6 +11,18 @@ with the reason and the size of the effect.
 
 ## [Unreleased]
 
+### Added
+
+- `monotone-convex` interpolation (`--interp monotone-convex`). It implements the monotone
+  convex method of Hagan and West on `-ln DF`. Instantaneous forwards are continuous at the
+  pillars and positive where the discrete forwards are. Where the discrete forwards are
+  monotone, the forwards do not overshoot them. Before the first pillar the scheme follows its
+  own construction. Beyond the last pillar it holds the last instantaneous forward. Validated
+  against QuantLib 1.44 `ConvexMonotone(0, 1, false)`, both the interpolator and the bootstrap,
+  and against hand calculations. See
+  [ADR 0014](docs/adr/0014-monotone-convex-interpolation.md). The default interpolation is
+  still `flat-forward`, and no existing output changes.
+
 ## [0.1.0] - 2026-11-17
 
 Initial MVP release.

@@ -22,6 +22,7 @@ ADRs are the authoritative explanation of *why* the code looks the way it does; 
 | [0011](0011-error-handling-and-exit-codes.md) | Error handling and exit codes | Accepted |
 | [0012](0012-testing-and-numerical-validation.md) | Testing and numerical validation | Accepted |
 | [0013](0013-horizon-analysis-methodology.md) | Horizon analysis methodology | Accepted |
+| [0014](0014-monotone-convex-interpolation.md) | Monotone convex interpolation | Proposed |
 
 ## When an ADR is required
 

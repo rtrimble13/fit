@@ -4,6 +4,7 @@
 
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <memory>
 #include <string>
@@ -19,9 +20,30 @@ std::vector<Quote> treasury_quotes() {
     return load_quotes(std::string(FIT_EXAMPLES_DIR) + "/usd_treasury.csv", kAsOf, {});
 }
 
+// The SOFR example as the walk-through builds it: T+2 on the US government bond calendar.
+QuoteConventions sofr_conventions() {
+    QuoteConventions conventions;
+    conventions.calendar = Calendar(Calendar::Rules::UsGovernmentBond);
+    conventions.settle_days = 2;
+    return conventions;
+}
+
+std::vector<Quote> sofr_quotes() {
+    return load_quotes(std::string(FIT_EXAMPLES_DIR) + "/usd_sofr.csv", kAsOf, sofr_conventions());
+}
+
 const InterpolationMethod kAllMethods[] = {
     InterpolationMethod::LinearZero, InterpolationMethod::FlatForward,
-    InterpolationMethod::CubicZero, InterpolationMethod::MonotoneCubic};
+    InterpolationMethod::CubicZero, InterpolationMethod::MonotoneCubic,
+    InterpolationMethod::MonotoneConvex};
+
+// Continuously compounded forward over [t - h, t] minus that over [t, t + h]: the jump in the
+// instantaneous forward at t, up to O(h) for a continuous forward curve.
+double forward_jump(const YieldCurve& curve, double t, double h) {
+    const double left = std::log(curve.discount_t(t - h) / curve.discount_t(t)) / h;
+    const double right = std::log(curve.discount_t(t) / curve.discount_t(t + h)) / h;
+    return right - left;
+}
 
 } // namespace
 
@@ -35,9 +57,10 @@ TEST_CASE("curve: nodes are reproduced by every interpolation method") {
         for (std::size_t i = 0; i < times.size(); ++i) {
             CHECK(curve.zero_rate_t(times[i]) == doctest::Approx(zeros[i]).epsilon(1e-13));
         }
-        // Before the first node the zero rate is held flat, except for the monotone cubic,
-        // whose forward curve is smooth all the way down to t = 0.
-        if (method != InterpolationMethod::MonotoneCubic) {
+        // Before the first node the zero rate is held flat, except for the monotone schemes,
+        // whose forward curves are smooth all the way down to t = 0.
+        if (method != InterpolationMethod::MonotoneCubic &&
+            method != InterpolationMethod::MonotoneConvex) {
             CHECK(curve.zero_rate_t(0.25) == doctest::Approx(0.040).epsilon(1e-12));
         }
         CHECK(curve.discount_t(0.25) < 1.0);
@@ -58,6 +81,66 @@ TEST_CASE("curve: interpolation between nodes") {
     CHECK(flat.instantaneous_forward_t(1.25) == doctest::Approx(0.07).epsilon(1e-10));
     CHECK(flat.instantaneous_forward_t(1.75) == doctest::Approx(0.07).epsilon(1e-10));
     CHECK(flat.instantaneous_forward_t(4.0) == doctest::Approx(0.07).epsilon(1e-10)); // extended
+
+    // Monotone convex on -ln DF = (0, 0.03, 0.10) at t = (0, 1, 2): discrete forwards 3% and 7%,
+    // node forwards f(1) = 5%, f(0) = 3% - (5% - 3%) / 2 = 2% and f(2) = 7% - (5% - 7%) / 2 = 8%.
+    // [0, 1]: g0 = -1%, g1 = 2% = -2 g0, region (i): -ln DF(t) = 3% t - 1% (t - t^3).
+    // [1, 2]: g0 = -2%, g1 = 1% = -g0 / 2, region (i): with u = t - 1,
+    //         -ln DF = 0.03 + 7% u - 2% (u - 1.5 u^2 + 0.5 u^3), and f = 7% - 2% (1 - 3u + 1.5u^2).
+    // Beyond t = 2 the forward stays at f(2) = 8%.
+    const InterpolatedCurve convex(kAsOf, times, zeros, InterpolationMethod::MonotoneConvex);
+    CHECK(convex.zero_rate_t(0.5) == doctest::Approx((0.015 - 0.01 * 0.375) / 0.5).epsilon(1e-13));
+    CHECK(convex.zero_rate_t(1.5) ==
+          doctest::Approx((0.03 + 0.035 - 0.02 * 0.1875) / 1.5).epsilon(1e-13));
+    CHECK(convex.zero_rate_t(4.0) == doctest::Approx((0.10 + 0.08 * 2.0) / 4.0).epsilon(1e-13));
+    // The one-day central difference of a quadratic forward is off by f'' h^2 / 6 = 1.9e-8
+    // (f'' = -6%, h = 1/730).
+    CHECK(convex.instantaneous_forward_t(1.5) == doctest::Approx(0.0725).epsilon(3e-8));
+    CHECK(convex.instantaneous_forward_t(5.0) == doctest::Approx(0.08).epsilon(1e-10));
+}
+
+TEST_CASE("curve: monotone convex with one pillar is flat") {
+    // One interval from the anchor: the forward is the single discrete forward, i.e. the zero.
+    const InterpolatedCurve curve(kAsOf, {2.0}, {0.04}, InterpolationMethod::MonotoneConvex);
+    for (const double t : {0.1, 1.0, 2.0, 7.5}) {
+        CHECK(curve.zero_rate_t(t) == doctest::Approx(0.04).epsilon(1e-14));
+    }
+}
+
+TEST_CASE("curve: monotone convex forwards stay positive where other schemes go negative") {
+    // Zero rates whose discrete forwards are 6%, 0.5% and 6%: a sharp dip in the middle year.
+    const std::vector<double> times{1.0, 2.0, 3.0};
+    const std::vector<double> zeros{0.06, (0.06 + 0.005) / 2.0, (0.06 + 0.005 + 0.06) / 3.0};
+    const InterpolatedCurve convex(kAsOf, times, zeros, InterpolationMethod::MonotoneConvex);
+    const InterpolatedCurve spline(kAsOf, times, zeros, InterpolationMethod::CubicZero);
+    double convex_min = 1.0;
+    double spline_min = 1.0;
+    for (int k = 1; k <= 500; ++k) {
+        const double t = 0.01 * k;
+        convex_min = std::min(convex_min, convex.instantaneous_forward_t(t));
+        spline_min = std::min(spline_min, spline.instantaneous_forward_t(t));
+    }
+    // The bounded node forwards (1%) put the minimum at 0.25% mid-interval (see test_math.cpp).
+    CHECK(convex_min == doctest::Approx(0.0025).epsilon(1e-6));
+    CHECK(spline_min < 0.0); // the zero-rate spline overshoots into negative forwards
+}
+
+TEST_CASE("curve: monotone convex forwards are continuous at the pillars") {
+    // On the bootstrapped Treasury curve the forward has no jump at any pillar, unlike
+    // flat-forward, whose forwards are piecewise constant. With h = 1e-5 years the measured jump
+    // of a continuous forward is O(|f'| h) plus rounding, far below 0.01bp.
+    const BootstrapResult convex =
+        bootstrap(kAsOf, treasury_quotes(), Calendar(), {InterpolationMethod::MonotoneConvex});
+    const BootstrapResult flat =
+        bootstrap(kAsOf, treasury_quotes(), Calendar(), {InterpolationMethod::FlatForward});
+    double flat_max = 0.0;
+    for (std::size_t i = 0; i < convex.quotes.size(); ++i) {
+        const double t = convex.curve->times()[i];
+        CAPTURE(t);
+        CHECK(std::fabs(forward_jump(*convex.curve, t, 1e-5)) < 1e-6);
+        flat_max = std::max(flat_max, std::fabs(forward_jump(*flat.curve, t, 1e-5)));
+    }
+    CHECK(flat_max > 1e-3); // the check can see a jump: flat-forward jumps by over 10bp
 }
 
 TEST_CASE("curve: rate conversions") {
@@ -136,7 +219,59 @@ TEST_CASE("bootstrap: every quote reprices under every interpolation method") {
             CHECK(implied_quote_rate(r.quotes[i], *r.curve, Calendar()) ==
                   doctest::Approx(r.quotes[i].rate).epsilon(1e-10));
         }
+
+        const Calendar us = sofr_conventions().calendar;
+        const BootstrapResult sofr = bootstrap(kAsOf, sofr_quotes(), us, {method});
+        CHECK(sofr.max_error < 1e-12);
+        REQUIRE(sofr.quotes.size() == 13);
+        for (std::size_t i = 0; i < sofr.quotes.size(); ++i) {
+            CHECK(implied_quote_rate(sofr.quotes[i], *sofr.curve, us) ==
+                  doctest::Approx(sofr.quotes[i].rate).epsilon(1e-10));
+        }
     }
+}
+
+TEST_CASE("bootstrap: negative rates under every interpolation method") {
+    // Negative short rates turning positive at the long end; every scheme must still reprice.
+    struct Row {
+        QuoteType type;
+        const char* tenor;
+        double rate;
+    };
+    const Row rows[] = {{QuoteType::Deposit, "1M", -0.0055}, {QuoteType::Deposit, "6M", -0.0050},
+                        {QuoteType::Swap, "1Y", -0.0048},    {QuoteType::Swap, "2Y", -0.0045},
+                        {QuoteType::Swap, "5Y", -0.0028},    {QuoteType::Swap, "10Y", 0.0002},
+                        {QuoteType::Swap, "20Y", 0.0015},    {QuoteType::Swap, "30Y", 0.0010}};
+    std::vector<Quote> quotes;
+    for (const Row& row : rows) {
+        quotes.push_back(make_quote(kAsOf, row.type, row.tenor, row.rate, {}));
+    }
+    for (const auto method : kAllMethods) {
+        CAPTURE(to_string(method));
+        const BootstrapResult r = bootstrap(kAsOf, quotes, Calendar(), {method});
+        CHECK(r.max_error < 1e-12);
+        CHECK(r.curve->instantaneous_forward_t(0.5) < 0.0);
+    }
+}
+
+TEST_CASE("bootstrap: monotone convex discount factors match QuantLib") {
+    // Reference: QuantLib 1.44 PiecewiseConvexMonotoneForward with ConvexMonotone(0, 1, false)
+    // (the Hagan-West method without QuantLib's blending parameters) built from the same
+    // DepositRateHelper / FixedRateBondHelper set as tools/quantlib_crosscheck.py. The two
+    // bootstraps agree to 1.4e-12 at every pillar and date tested inside the pillar range.
+    const BootstrapResult r =
+        bootstrap(kAsOf, treasury_quotes(), Calendar(), {InterpolationMethod::MonotoneConvex});
+    CHECK(r.passes > 1); // not a purely local scheme: later pillars move earlier segments
+    const double tol = 1e-10;
+    CHECK(r.curve->discount(Date(2028, 11, 17)) == doctest::Approx(0.925726006008).epsilon(tol));
+    CHECK(r.curve->discount(Date(2036, 11, 17)) == doctest::Approx(0.653968429864).epsilon(tol));
+    CHECK(r.curve->discount(Date(2056, 11, 17)) == doctest::Approx(0.253063616820).epsilon(tol));
+    CHECK(r.curve->discount(Date(2026, 12, 1)) == doctest::Approx(0.998320345834).epsilon(tol));
+    CHECK(r.curve->discount(Date(2027, 8, 3)) == doctest::Approx(0.971289888186).epsilon(tol));
+    CHECK(r.curve->discount(Date(2030, 1, 15)) == doctest::Approx(0.885805751248).epsilon(tol));
+    CHECK(r.curve->discount(Date(2033, 5, 5)) == doctest::Approx(0.771233403037).epsilon(tol));
+    CHECK(r.curve->discount(Date(2041, 6, 30)) == doctest::Approx(0.516061545237).epsilon(tol));
+    CHECK(r.curve->discount(Date(2050, 2, 2)) == doctest::Approx(0.337368575979).epsilon(tol));
 }
 
 TEST_CASE("bootstrap: discount factors match QuantLib") {

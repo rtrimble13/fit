@@ -13,6 +13,13 @@ namespace {
 
 constexpr double kShortTime = 1.0 / 365.0;
 
+/// Schemes that interpolate -ln DF(t) = z(t) t through an anchor at t = 0.
+bool interpolates_log_discount(InterpolationMethod method) {
+    return method == InterpolationMethod::FlatForward ||
+           method == InterpolationMethod::MonotoneCubic ||
+           method == InterpolationMethod::MonotoneConvex;
+}
+
 } // namespace
 
 InterpolationMethod parse_interpolation_method(std::string_view text) {
@@ -31,8 +38,12 @@ InterpolationMethod parse_interpolation_method(std::string_view text) {
     if (t == "monotone-cubic" || t == "pchip") {
         return InterpolationMethod::MonotoneCubic;
     }
+    if (t == "monotone-convex") {
+        return InterpolationMethod::MonotoneConvex;
+    }
     throw Error("unknown interpolation '" + std::string(text) +
-                "' (expected linear-zero, flat-forward, cubic-zero or monotone-cubic)");
+                "' (expected linear-zero, flat-forward, cubic-zero, monotone-cubic or "
+                "monotone-convex)");
 }
 
 std::string to_string(InterpolationMethod method) {
@@ -45,6 +56,8 @@ std::string to_string(InterpolationMethod method) {
         return "cubic-zero";
     case InterpolationMethod::MonotoneCubic:
         return "monotone-cubic";
+    case InterpolationMethod::MonotoneConvex:
+        return "monotone-convex";
     }
     return "";
 }
@@ -159,9 +172,7 @@ InterpolatedCurve::InterpolatedCurve(Date as_of, std::vector<double> times,
         require(times_[i] > times_[i - 1], "curve: node times must be strictly increasing");
     }
 
-    const bool on_log_discount = method_ == InterpolationMethod::FlatForward ||
-                                 method_ == InterpolationMethod::MonotoneCubic;
-    if (on_log_discount) {
+    if (interpolates_log_discount(method_)) {
         // Interpolate y(t) = z(t) * t = -ln DF(t), anchored at y(0) = 0.
         std::vector<double> x{0.0};
         std::vector<double> y{0.0};
@@ -169,9 +180,13 @@ InterpolatedCurve::InterpolatedCurve(Date as_of, std::vector<double> times,
             x.push_back(times_[i]);
             y.push_back(zero_rates_[i] * times_[i]);
         }
-        interpolation_ = method_ == InterpolationMethod::FlatForward
-                             ? Interpolation::linear(std::move(x), std::move(y))
-                             : Interpolation::monotone_cubic(std::move(x), std::move(y));
+        if (method_ == InterpolationMethod::MonotoneConvex) {
+            monotone_convex_.emplace(std::move(x), std::move(y));
+        } else {
+            interpolation_ = method_ == InterpolationMethod::FlatForward
+                                 ? Interpolation::linear(std::move(x), std::move(y))
+                                 : Interpolation::monotone_cubic(std::move(x), std::move(y));
+        }
     } else if (times_.size() >= 2) {
         interpolation_ = method_ == InterpolationMethod::LinearZero
                              ? Interpolation::linear(times_, zero_rates_)
@@ -184,10 +199,10 @@ double InterpolatedCurve::discount_t(double t) const {
     if (t == 0.0) {
         return 1.0;
     }
-    if (method_ == InterpolationMethod::FlatForward ||
-        method_ == InterpolationMethod::MonotoneCubic) {
+    if (interpolates_log_discount(method_)) {
         // Beyond the last node the interpolant continues linearly: flat forward extrapolation.
-        return std::exp(-interpolation_->value(t));
+        return std::exp(
+            -(monotone_convex_ ? monotone_convex_->value(t) : interpolation_->value(t)));
     }
     // Zero-rate schemes extrapolate the zero rate flat on both sides.
     const double clamped = std::clamp(t, times_.front(), times_.back());
