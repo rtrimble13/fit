@@ -1,0 +1,5 @@
+# Proposed trades: extend duration by selling 2Y and buying 30Y, and add a new corporate.
+id,face,maturity,coupon,frequency,daycount,price,zspread
+UST-2Y,-10000000,2028-10-31,3.875,2,act/act,99.9375,
+UST-30Y,4000000,2056-11-15,4.625,2,act/act,100.6250,
+CORP-A-2034,3000000,2034-09-15,5.250,2,30/360,,95

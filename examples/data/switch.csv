@@ -1,0 +1,4 @@
+# A duration-neutral switch: buy 30Y against a DV01-weighted sale of 10Y.
+id,face,maturity,coupon,price
+UST-30Y,4000000,2056-11-15,4.625,100.625
+UST-10Y,-8000000,2036-11-15,4.250,99.9375
