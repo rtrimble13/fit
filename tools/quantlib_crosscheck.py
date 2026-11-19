@@ -14,6 +14,12 @@ so the two curves legitimately differ between pillars.
 The monotone-convex scheme is compared with QuantLib's ConvexMonotone(0, 1, false), which is
 the published Hagan-West method (ADR 0014), and only inside the pillar range: beyond the last
 pillar QuantLib holds the last discrete forward, fit the last instantaneous forward.
+
+Beyond the last pillar, flat-forward extrapolation (ADR 0015) is compared for the flat-forward
+and linear-zero curves, whose QuantLib counterparts hold the instantaneous forward there.
+
+The SOFR OIS curve is compared with OISRateHelper, and the 3M projection curve built on it with
+SwapRateHelper and an exogenous discounting curve (ADR 0016).
 """
 import json
 import subprocess
@@ -96,6 +102,13 @@ for interp,make in curves:
     npv=sum(cf.amount()*zs.discount(cf.date()) for cf in b.cashflows() if cf.date()>s)/zs.discount(s)
     r=fit("bond","price","--maturity","2036-11-15","--coupon","4.25","--settle","2026-11-18","--curve","examples/data/usd_treasury.csv","--asof",asof,"--interp",interp,"--zspread","75")["bond"]
     cmp("curve dirty z=75",r["dirty_price"],npv,1e-8)
+# extrapolation beyond the last pillar (2056-11-17): QuantLib holds the instantaneous forward
+print("extrapolation")
+beyond="2057-03-31,2060-01-01,2066-11-17,2076-11-17"
+for interp,cls in [("flat-forward",ql.PiecewiseLogLinearDiscount),("linear-zero",ql.PiecewiseLinearZero)]:
+    c=cls(a,hs,ql.Actual365Fixed()); c.enableExtrapolation()
+    q=fit("curve","query","--curve","examples/data/usd_treasury.csv","--asof",asof,"--interp",interp,"--extrapolation","flat-forward","--dates",beyond)["curve"]
+    for n in q: cmp(interp+" extrap df "+n["date"],n["discount"],c.discount(D(n["date"])),1e-9)
 # OIS swaps
 print("sofr")
 cal=ql.UnitedStates(ql.UnitedStates.GovernmentBond)
@@ -107,5 +120,39 @@ for (t,ten,r),n in zip(sq,nodes):
     ok = str(end.ISO()) == n["pillar"]
     failures += not ok
     print(("OK " if ok else "BAD"), "pillar", ten, n["pillar"], end.ISO())
+# OISRateHelper defaults: annual fixed leg on the index day count (ACT/360), periods accruing
+# between modified-following adjusted dates, no payment lag. An overnight index on the US
+# government bond calendar matches fit's `us` calendar.
+on=ql.OvernightIndex("SOFR-GB",0,ql.USDCurrency(),cal,ql.Actual360())
+ois=[]
+for t,ten,r in sq:
+    if t=="deposit":
+        ois.append(ql.DepositRateHelper(ql.QuoteHandle(ql.SimpleQuote(r/100)),ql.Period(ten),2,cal,ql.ModifiedFollowing,False,ql.Actual360()))
+    else:
+        ois.append(ql.OISRateHelper(2,ql.Period(ten),ql.QuoteHandle(ql.SimpleQuote(r/100)),on))
+sofr=ql.PiecewiseLogLinearDiscount(a,ois,ql.Actual365Fixed())
+for n in nodes: cmp("sofr df "+n["tenor"],n["discount"],sofr.discount(D(n["pillar"])),1e-9)
+q=fit("curve","query","--curve","examples/data/usd_sofr.csv","--asof",asof,"--spot-lag","2","--calendar","us","--dates","2027-08-03,2030-01-15,2041-06-30,2050-02-02")["curve"]
+for n in q: cmp("sofr interp df "+n["date"],n["discount"],sofr.discount(D(n["date"])),1e-9)
+# Dual curve (ADR 0016): the 3M projection curve on the SOFR OIS curve. SwapRateHelper with an
+# exogenous discounting curve; withIndexedCoupons=False gives par coupons, as fit uses.
+print("dual curve")
+ibor=ql.IborIndex("TSOFR3M",ql.Period("3M"),2,ql.USDCurrency(),cal,ql.ModifiedFollowing,False,ql.Actual360())
+dh=ql.YieldTermStructureHandle(sofr)
+pq=[("deposit","3M",4.29),("irs","1Y",4.02),("irs","2Y",3.81),("irs","3Y",3.76),("irs","5Y",3.79),("irs","7Y",3.88),("irs","10Y",4.01),("irs","15Y",4.16),("irs","20Y",4.20),("irs","30Y",4.10)]
+ph=[]
+for t,ten,r in pq:
+    rq=ql.QuoteHandle(ql.SimpleQuote(r/100))
+    if t=="deposit":
+        ph.append(ql.DepositRateHelper(rq,ql.Period(ten),2,cal,ql.ModifiedFollowing,False,ql.Actual360()))
+    else:
+        ph.append(ql.SwapRateHelper(rq,ql.Period(ten),cal,ql.Annual,ql.ModifiedFollowing,ql.Actual360(),ibor,
+                                    ql.QuoteHandle(),ql.Period(0,ql.Days),dh,ql.nullInt(),ql.Pillar.LastRelevantDate,ql.Date(),False,False))
+proj=ql.PiecewiseLogLinearDiscount(a,ph,ql.Actual365Fixed())
+dual=["--discount-curve","examples/data/usd_sofr.csv","--projection-curve","examples/data/usd_term_sofr_3m.csv","--asof",asof,"--spot-lag","2","--calendar","us"]
+for n in fit("curve","build",*dual)["nodes"]:
+    if n["curve"]=="projection": cmp("projection df "+n["tenor"],n["discount"],proj.discount(D(n["pillar"])),1e-9)
+q=fit("curve","query",*dual,"--dates","2027-08-03,2030-01-15,2041-06-30,2050-02-02")["curve"]
+for n in q: cmp("projection interp df "+n["date"],n["discount"],proj.discount(D(n["date"])),1e-9)
 print(f"{failures} failure(s)")
 sys.exit(1 if failures else 0)

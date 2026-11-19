@@ -3,6 +3,7 @@ add_executable(fit_unit_tests
   unit/test_time.cpp
   unit/test_math.cpp
   unit/test_curve.cpp
+  unit/test_curve_set.cpp
   unit/test_bond.cpp
   unit/test_portfolio.cpp
   unit/test_io.cpp

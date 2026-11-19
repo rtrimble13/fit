@@ -61,8 +61,9 @@ if that falls inside a period, the first period is a **short stub** whose refere
 is the full regular period ending on the first coupon date. Without a dated date the
 schedule is regular.
 
-Accrual dates are never business-day adjusted. Payment dates are adjusted with the
-`following` convention on the chosen calendar.
+Bond accrual dates are never business-day adjusted. Payment dates are adjusted with the
+`following` convention on the chosen calendar. Swaps differ: their periods accrue between
+adjusted dates (section 4).
 
 ## 3. Yield curves
 
@@ -73,7 +74,8 @@ date and `z` the continuously compounded zero rate, so
 DF(t) = exp(-z(t) t)
 ```
 
-**Interpolation** (`--interp`):
+**Interpolation** (`--interp`). The last column is each scheme's default extrapolation; see
+below for `--extrapolation`.
 
 | Scheme | Rule between nodes | Before first node | After last node |
 |--------|--------------------|-------------------|-----------------|
@@ -85,6 +87,21 @@ DF(t) = exp(-z(t) t)
 
 `monotone-cubic` preserves the monotonicity of `-ln DF`, so interpolated forward rates are
 non-negative wherever the node discount factors are non-increasing.
+
+**Extrapolation** (`--extrapolation`; decision in
+[ADR 0015](adr/0015-selectable-extrapolation.md)). Beyond the last pillar `t_n`, with zero rate
+`z_n` there:
+
+| Rule | Definition | Forward at `t_n` |
+|------|------------|------------------|
+| `flat-forward` | `-ln DF(t) = z_n t_n + f_n (t - t_n)`. On the `-ln DF` schemes `f_n` is the slope of the interpolant at `t_n`; on the zero-rate schemes `f_n = z_n + t_n z'(t_n)`, with `z'` the slope of the zero interpolant there | continuous |
+| `flat-zero` | `DF(t) = exp(-z_n t)` | jumps from `f_n` to `z_n` |
+
+Without the option, each scheme extrapolates as in the table above: `flat-zero` for
+`linear-zero` and `cubic-zero`, `flat-forward` for the others. `fit curve build` reports the
+rule in use. Before the first pillar the behaviour is fixed (see the table above) and does not
+depend on the option. The bootstrap solves the same nodes under either rule, because no
+instrument pays beyond its own pillar.
 
 **Monotone convex** (P. S. Hagan and G. West, "Interpolation methods for curve construction",
 *Applied Mathematical Finance* 13(2), 2006; "Methods for constructing a yield curve", *Wilmott
@@ -157,11 +174,14 @@ start date: the as-of date advanced by the spot lag (`--spot-lag`, or the row's
 | Type | Model-implied rate | Pillar date |
 |------|--------------------|-------------|
 | `deposit` | `(DF(S)/DF(E') - 1) / tau(S, E')`, `E'` = `E` adjusted modified-following | `E'` |
-| `swap` | `(DF(S) - DF(P_n)) / sum_i tau_i DF(P_i)` over the fixed schedule, payments adjusted modified-following | last payment |
+| `swap` | `(DF(S) - DF(P_n)) / sum_i tau_i DF(P_i)` over the fixed schedule. Each period accrues from the previous adjusted date (`S` for the first) to its own end adjusted modified-following, `P_i`, and is paid on `P_i`, as in ISDA swaps | last payment |
+| `irs` | the same formula on one curve. On a projection curve, see below | last payment |
 | `par` | same formula over the coupon schedule, payments adjusted following; equivalent to a bond with that coupon pricing at 100 on `S` | last payment |
 | `zero` | `z(E)`; no spot lag | `E` |
 
-Defaults: `deposit` ACT/360; `swap` annual, ACT/360; `par` semi-annual, ACT/ACT ICMA.
+Defaults: `deposit` ACT/360; `swap` annual, ACT/360; `irs` annual ACT/360 fixed against
+quarterly floating periods (`float_frequency`, a 3M term rate); `par` semi-annual, ACT/ACT
+ICMA.
 Schedules are generated as in section 2 with `S` as the dated date. The `swap` formula is the
 single-curve result: the floating leg is worth `DF(S) - DF(P_n)`.
 
@@ -175,6 +195,27 @@ stop when the largest repricing error over all quotes is at most `1e-12` in rate
 and `monotone-convex` three or four.
 If 100 sweeps do not converge the command fails; a curve that does not reprice is never
 returned.
+
+**Projection curves** ([ADR 0016](adr/0016-multi-curve-construction.md)). A projection curve
+`P` is bootstrapped on an already built discount curve `D`, for example a 3M term-rate curve on
+the SOFR OIS curve. The algorithm is the same, with `D` held fixed. Floating legs are projected
+on `P` and every leg is discounted on `D`:
+
+| Type | Model-implied rate on `P` with discount curve `D` |
+|------|---------------------------------------------------|
+| `deposit` | `(P(S)/P(E') - 1) / tau(S, E')`: a term-rate fixing |
+| `swap` | `sum_j D(P_j) (P(P_(j-1))/P(P_j) - 1) / sum_i tau_i D(P_i)` over the fixed schedule (overnight compounding telescopes within each period on `P`) |
+| `irs` | the same, with the floating sum over the floating schedule (`float_frequency` periods a year, adjusted modified-following) |
+| `zero` | `z_P(E)` |
+| `par` | not allowed |
+
+Floating coupons are par coupons: each pays the forward of `P` over its own accrual period, so
+the floating day count cancels. When `P` and `D` are the same curve the floating legs telescope
+to `D(S) - D(P_n)` and the single-curve formulas above result.
+
+A curve set ([ADR 0017](adr/0017-curve-sets.md)) builds each of its curves after the curve that
+discounts it. A bond priced against any curve of a market is discounted on that curve's discount
+curve.
 
 ## 5. Bonds
 
@@ -332,10 +373,15 @@ Expected values in the test suite come from sources independent of this code bas
 | Price, yield, Macaulay and modified duration | published Microsoft Excel examples for `PRICE`, `YIELD`, `DURATION`, `MDURATION` | to the published digits |
 | Accrued, clean price, durations, convexity across day counts, frequencies, stubs and month-end schedules | QuantLib `BondFunctions` | `1e-9` relative |
 | Bootstrapped discount factors (`flat-forward`, `linear-zero`) at and between pillars | QuantLib `PiecewiseLogLinearDiscount`, `PiecewiseLinearZero` | `1e-9` |
+| Bootstrapped SOFR OIS discount factors (`swap` quotes, spot lag, US calendar) at and between pillars | QuantLib 1.44 `OISRateHelper` with default (modified-following, annual, ACT/360) conventions | `1e-10` |
+| Dual-curve projection curve (`deposit` and `irs` on the SOFR OIS curve; `flat-forward` and `linear-zero`) at and between pillars | QuantLib 1.44 `SwapRateHelper` with a 3M `IborIndex`, an exogenous discounting curve and par coupons; 3M forwards agree to `1e-11`% | `1e-10` |
+| Floating legs on a projection curve | hand calculation on flat curves | `1e-15` |
 | Curve price with z-spread | QuantLib `ZeroSpreadedTermStructure` | `1e-8` |
 | Natural cubic and monotone cubic interpolation | SciPy `CubicSpline(bc_type="natural")`, `PchipInterpolator` | `1e-11` |
 | Monotone convex interpolation: forwards in every region, with uneven spacing and negative and mixed-sign rates | QuantLib 1.44 `ConvexMonotoneInterpolation` with quadraticity 0, monotonicity 1, `forcePositive` false (the published method); hand calculations for each region and for the positivity bounds | `1e-15` |
 | Bootstrapped `monotone-convex` discount factors at and between pillars | QuantLib 1.44 `PiecewiseConvexMonotoneForward` with `ConvexMonotone(0, 1, false)` | `1e-10` |
+| `flat-forward` extrapolation to 50 years: `flat-forward` and `linear-zero` curves | QuantLib 1.44 `PiecewiseLogLinearDiscount`, `PiecewiseLinearZero` with extrapolation enabled | `1e-10` |
+| `flat-zero` extrapolation and `flat-forward` on `cubic-zero` | hand calculation | `1e-14` |
 | US government bond calendar | QuantLib, every day 1990-2060 | exact |
 | Day counts | ISDA ACT/ACT examples | exact |
 

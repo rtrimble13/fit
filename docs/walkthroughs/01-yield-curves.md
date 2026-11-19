@@ -13,8 +13,9 @@ The numbers are not real market data. Every code block below is the tool's actua
 - [5. Forward rates](#5-forward-rates)
 - [6. The forward-implied curve](#6-the-forward-implied-curve)
 - [7. A swap curve with a spot lag and a holiday calendar](#7-a-swap-curve-with-a-spot-lag-and-a-holiday-calendar)
-- [8. Machine-readable output](#8-machine-readable-output)
-- [9. When inputs are wrong](#9-when-inputs-are-wrong)
+- [8. A projection curve on an OIS discount curve](#8-a-projection-curve-on-an-ois-discount-curve)
+- [9. Machine-readable output](#9-machine-readable-output)
+- [10. When inputs are wrong](#10-when-inputs-are-wrong)
 
 ## 1. The quotes file
 
@@ -22,17 +23,19 @@ A curve is described by a CSV of market quotes. Three columns are required:
 
 | Column | Meaning |
 |--------|---------|
-| `type` | `deposit`, `swap`, `par` or `zero` |
+| `type` | `deposit`, `swap`, `irs`, `par` or `zero` |
 | `tenor` | a tenor from the quote's start date (`3M`, `10Y`) or an explicit maturity date |
 | `rate` | the quote in percent |
 
 Optional per-row columns `daycount`, `frequency` and `settle_days` override the defaults of
-the quote type:
+the quote type (the fixed leg, for swaps), and `float_frequency` sets an `irs` quote's floating
+periods:
 
 | Type | Instrument | Default conventions |
 |------|------------|---------------------|
 | `deposit` | cash deposit or bill, simple interest | ACT/360 |
-| `swap` | par swap, fixed vs overnight, discounted on this curve | annual fixed leg, ACT/360 |
+| `swap` | par OIS swap, fixed vs compounded overnight rate | annual fixed leg, ACT/360 |
+| `irs` | par swap, fixed vs a term rate such as 3M (section 8) | annual ACT/360 fixed, quarterly floating |
 | `par` | coupon bond priced at 100 | semi-annual, ACT/ACT ICMA |
 | `zero` | continuously compounded zero rate | ACT/365F, starts on the as-of date |
 
@@ -67,6 +70,7 @@ curve
 =====
 as_of                     2026-11-17
 interpolation           flat-forward
+extrapolation           flat-forward
 calendar                    weekends
 nodes                             11
 bootstrap_passes                   1
@@ -202,11 +206,12 @@ The spline is a global scheme: each pillar depends on all the others, so the boo
 repeatedly until everything reprices.
 
 ```console
-$ fit curve build --curve examples/data/usd_treasury.csv --asof 2026-11-17 --interp cubic-zero | head -8
+$ fit curve build --curve examples/data/usd_treasury.csv --asof 2026-11-17 --interp cubic-zero | head -9
 curve
 =====
 as_of                   2026-11-17
 interpolation           cubic-zero
+extrapolation            flat-zero
 calendar                  weekends
 nodes                           11
 bootstrap_passes                 5
@@ -221,11 +226,12 @@ scheme is local, since a quote affects forwards only on neighbouring intervals, 
 strictly local, so the bootstrap again takes a few sweeps:
 
 ```console
-$ fit curve build --curve examples/data/usd_treasury.csv --asof 2026-11-17 --interp monotone-convex | head -8
+$ fit curve build --curve examples/data/usd_treasury.csv --asof 2026-11-17 --interp monotone-convex | head -9
 curve
 =====
 as_of                        2026-11-17
 interpolation           monotone-convex
+extrapolation              flat-forward
 calendar                       weekends
 nodes                                11
 bootstrap_passes                      4
@@ -235,6 +241,46 @@ max_repricing_error_bp       0.00000000
 The default remains `flat-forward`. The method and its validation are described in
 [METHODOLOGY.md](../METHODOLOGY.md#3-yield-curves) and
 [ADR 0014](../adr/0014-monotone-convex-interpolation.md).
+
+### Beyond the last pillar
+
+Past the last quote, here the 30Y bond, the curve has to be extrapolated. `--extrapolation`
+picks the rule. `flat-zero` holds the last zero rate. `flat-forward` holds the instantaneous
+forward at the last pillar, so forwards stay continuous; QuantLib's curves use the same rule.
+Without the option, each scheme keeps its own rule: `flat-zero` for `linear-zero` and
+`cubic-zero`, and `flat-forward` for the others. `fit curve build` reports the rule in use.
+
+```console
+$ for e in flat-zero flat-forward; do echo "--- $e"; fit curve query --curve examples/data/usd_treasury.csv --asof 2026-11-17 --interp linear-zero --extrapolation $e --tenors 25Y,40Y,50Y --format csv | cut -d, -f1,4,7,8; done
+--- flat-zero
+tenor,zero_cc_pct,fwd_inst_pct,discount
+25Y,4.65295710856,4.35343268326,0.312233445935
+40Y,4.59302598108,4.59302598108,0.159060800669
+50Y,4.59302598108,4.59302598109,0.100444608483
+--- flat-forward
+tenor,zero_cc_pct,fwd_inst_pct,discount
+25Y,4.65295710856,4.35343268326,0.312233445935
+40Y,4.50317439458,4.2335704283,0.16488557933
+50Y,4.4492476964,4.23357042828,0.107936896773
+```
+
+The 25Y point lies inside the curve, so it does not depend on the rule. At 50 years the
+discount factors differ by 7.5% and the zero rates by 14bp. The choice reaches every cash
+flow past the last pillar, so it moves the price of a 40-year bond by about three quarters of a
+point:
+
+```console
+$ for e in flat-zero flat-forward; do echo "--- $e"; fit bond price --maturity 2066-11-15 --coupon 4.5 --curve examples/data/usd_treasury.csv --asof 2026-11-17 --interp linear-zero --extrapolation $e --format csv | grep -E '^(clean_price|zspread_bp),'; done
+--- flat-zero
+clean_price,98.3954340814
+zspread_bp,0
+--- flat-forward
+clean_price,99.13682833
+zspread_bp,0
+```
+
+Bonds that mature inside the curve, including their [horizon analysis](03-forecasting.md), do
+not depend on the rule.
 
 ## 5. Forward rates
 
@@ -296,6 +342,7 @@ curve
 =====
 as_of                     2026-11-17
 interpolation           flat-forward
+extrapolation           flat-forward
 calendar                          us
 nodes                             13
 bootstrap_passes                   1
@@ -310,22 +357,176 @@ tenor  type     pillar        years  quote_pct  zero_cc_pct  discount  error_bp
 3M     deposit  2027-02-19   0.2575     4.2400       4.2782  0.989043  0.000000
 6M     deposit  2027-05-19   0.5014     4.1200       4.1373  0.979470  0.000000
 1Y     swap     2027-11-19   1.0055     3.9600       3.9390  0.961169  0.000000
-2Y     swap     2028-11-20   2.0110     3.7400       3.7144  0.928026  0.000000
+2Y     swap     2028-11-20   2.0110     3.7400       3.7194  0.927933  0.000000
 3Y     swap     2029-11-19   3.0082     3.6800       3.6596  0.895755  0.000000
 5Y     swap     2031-11-19   5.0082     3.7100       3.6920  0.831185  0.000000
-7Y     swap     2033-11-21   7.0164     3.8000       3.7860  0.766713  0.000000
-10Y    swap     2036-11-19  10.0137     3.9300       3.9330  0.674465  0.000000
-15Y    swap     2041-11-19  15.0164     4.0800       4.1070  0.539707  0.000000
-20Y    swap     2046-11-19  20.0192     4.1200       4.1487  0.435815  0.000000
-30Y    swap     2056-11-20  30.0301     4.0200       3.9748  0.303114  0.000000
+7Y     swap     2033-11-21   7.0164     3.8000       3.7888  0.766561  0.000000
+10Y    swap     2036-11-19  10.0137     3.9300       3.9329  0.674470  0.000000
+15Y    swap     2041-11-19  15.0164     4.0800       4.1070  0.539705  0.000000
+20Y    swap     2046-11-19  20.0192     4.1200       4.1488  0.435808  0.000000
+30Y    swap     2056-11-20  30.0301     4.0200       3.9752  0.303079  0.000000
 ```
 
 The start date is Thursday 19 November. The 1W deposit would mature on Thursday 26 November,
-which is Thanksgiving, so its pillar rolls to the 27th. Calendars available are `none`,
+which is Thanksgiving, so its pillar rolls to the 27th. Swap periods accrue between adjusted
+dates, as swaps do: the 2Y swap's second period ends on Sunday 19 November 2028, so it runs to
+Monday the 20th and accrues for 367 days. Calendars available are `none`,
 `weekends` (default) and `us`; `--holidays FILE` adds dates of your own (one ISO date per
 line) to any of them.
 
-## 8. Machine-readable output
+## 8. A projection curve on an OIS discount curve
+
+A term rate such as 3M Term SOFR is not the rate swaps are discounted at; collateralised swaps
+discount at the overnight rate. A 3M swap curve is therefore built as a *projection* curve on
+an OIS *discount* curve. Its swaps' floating legs project 3M forwards on the projection curve,
+and every cash flow is discounted on the OIS curve:
+
+```console
+$ cat examples/data/usd_term_sofr_3m.csv
+# Illustrative USD 3M Term SOFR projection curve as of 2026-11-17 (not real market data).
+# The deposit is the 3M fixing. Swaps (irs) pay annual ACT/360 fixed against the quarterly 3M
+# rate and are discounted on the SOFR OIS curve (usd_sofr.csv): build with
+#   --discount-curve usd_sofr.csv --projection-curve usd_term_sofr_3m.csv --spot-lag 2 --calendar us
+type,tenor,rate
+deposit,3M,4.29
+irs,1Y,4.02
+irs,2Y,3.81
+irs,3Y,3.76
+irs,5Y,3.79
+irs,7Y,3.88
+irs,10Y,4.01
+irs,15Y,4.16
+irs,20Y,4.20
+irs,30Y,4.10
+```
+
+`--discount-curve` and `--projection-curve` replace `--curve`:
+
+```console
+$ fit curve build --discount-curve examples/data/usd_sofr.csv --projection-curve examples/data/usd_term_sofr_3m.csv --asof 2026-11-17 --spot-lag 2 --calendar us
+curves
+======
+curve       discount_curve  interpolation  extrapolation  calendar  nodes  bootstrap_passes  max_repricing_error_bp
+----------  --------------  -------------  -------------  --------  -----  ----------------  ----------------------
+discount    discount        flat-forward   flat-forward   us           13                 1              0.00000000
+projection  discount        flat-forward   flat-forward   us           10                 1              0.00000000
+
+market
+======
+as_of     2026-11-17
+calendar          us
+
+nodes
+=====
+curve       tenor  type     pillar        years  quote_pct  zero_cc_pct  discount  error_bp
+----------  -----  -------  ----------  -------  ---------  -----------  --------  --------
+discount    1W     deposit  2026-11-27   0.0274     4.3300       4.3880  0.998799  0.000000
+discount    1M     deposit  2026-12-21   0.0932     4.3100       4.3631  0.995944  0.000000
+discount    3M     deposit  2027-02-19   0.2575     4.2400       4.2782  0.989043  0.000000
+discount    6M     deposit  2027-05-19   0.5014     4.1200       4.1373  0.979470  0.000000
+discount    1Y     swap     2027-11-19   1.0055     3.9600       3.9390  0.961169  0.000000
+discount    2Y     swap     2028-11-20   2.0110     3.7400       3.7194  0.927933  0.000000
+discount    3Y     swap     2029-11-19   3.0082     3.6800       3.6596  0.895755  0.000000
+discount    5Y     swap     2031-11-19   5.0082     3.7100       3.6920  0.831185  0.000000
+discount    7Y     swap     2033-11-21   7.0164     3.8000       3.7888  0.766561  0.000000
+discount    10Y    swap     2036-11-19  10.0137     3.9300       3.9329  0.674470  0.000000
+discount    15Y    swap     2041-11-19  15.0164     4.0800       4.1070  0.539705  0.000000
+discount    20Y    swap     2046-11-19  20.0192     4.1200       4.1488  0.435808  0.000000
+discount    30Y    swap     2056-11-20  30.0301     4.0200       3.9752  0.303079  0.000000
+projection  3M     deposit  2027-02-19   0.2575     4.2900       4.3259  0.988921  0.000000
+projection  1Y     irs      2027-11-19   1.0055     4.0200       3.9983  0.960595  0.000000
+projection  2Y     irs      2028-11-20   2.0110     3.8100       3.7889  0.926637  0.000000
+projection  3Y     irs      2029-11-19   3.0082     3.7600       3.7393  0.893610  0.000000
+projection  5Y     irs      2031-11-19   5.0082     3.7900       3.7715  0.827882  0.000000
+projection  7Y     irs      2033-11-21   7.0164     3.8800       3.8682  0.762302  0.000000
+projection  10Y    irs      2036-11-19  10.0137     4.0100       4.0122  0.669138  0.000000
+projection  15Y    irs      2041-11-19  15.0164     4.1600       4.1862  0.533330  0.000000
+projection  20Y    irs      2046-11-19  20.0192     4.2000       4.2279  0.428962  0.000000
+projection  30Y    irs      2056-11-20  30.0301     4.1000       4.0544  0.295960  0.000000
+```
+
+The discount curve is exactly the curve of section 7. The projection curve reprices every
+quote with OIS discounting; the 3M deposit is the rate's fixing. `fit curve query` and
+`fit curve forwards` read the projection curve, so its forwards carry the 3M basis over OIS:
+
+```console
+$ for c in "--curve examples/data/usd_sofr.csv" "--discount-curve examples/data/usd_sofr.csv --projection-curve examples/data/usd_term_sofr_3m.csv"; do echo "--- $c"; fit curve forwards $c --asof 2026-11-17 --spot-lag 2 --calendar us --tenor 1Y --end 5Y --format csv | cut -d, -f1,4; done
+--- --curve examples/data/usd_sofr.csv
+start,fwd_simple_pct
+2026-11-17,3.96363348888
+2027-11-17,3.51454261525
+2028-11-17,3.5526190016
+2029-11-17,3.75823149393
+2030-11-17,3.75936367846
+--- --discount-curve examples/data/usd_sofr.csv --projection-curve examples/data/usd_term_sofr_3m.csv
+start,fwd_simple_pct
+2026-11-17,4.02405361088
+2027-11-17,3.59628285001
+2028-11-17,3.65504067679
+2029-11-17,3.83949898821
+2030-11-17,3.84051343345
+```
+
+Bonds are always discounted on the discount curve: a fixed-rate bond priced with the pair has
+the same price as on `usd_sofr.csv` alone (`clean_price,102.463656476`). The
+projection curve will matter to floating-rate notes. The pricing formulas are in
+[METHODOLOGY.md](../METHODOLOGY.md#4-bootstrapping) and the design in
+[ADR 0016](../adr/0016-multi-curve-construction.md).
+
+### Curve sets
+
+The pair is a shorthand for a two-curve market whose curves are named `discount` and
+`projection`. A curve-set file names any number of curves. Each row gives a curve's quotes file
+and the curve that discounts it, and may override the command line's conventions for that curve:
+
+```console
+$ cat examples/data/usd_curves.csv
+# Illustrative USD curve set as of 2026-11-17: each row names a curve, its quotes file (relative
+# to this file) and the curve that discounts it (empty: itself). Optional columns interp,
+# extrapolation, calendar and spot_lag override the command line for that curve.
+name,quotes,discount,calendar,spot_lag
+sofr,usd_sofr.csv,,us,2
+term-sofr-3m,usd_term_sofr_3m.csv,sofr,us,2
+treasury,usd_treasury.csv,,weekends,0
+```
+
+`fit curve build` builds and reports every curve. Each curve is built after the curve that
+discounts it, whatever the row order:
+
+```console
+$ fit curve build --curve-set examples/data/usd_curves.csv --asof 2026-11-17 | head -12
+curves
+======
+curve         discount_curve  interpolation  extrapolation  calendar  nodes  bootstrap_passes  max_repricing_error_bp
+------------  --------------  -------------  -------------  --------  -----  ----------------  ----------------------
+sofr          sofr            flat-forward   flat-forward   us           13                 1              0.00000000
+term-sofr-3m  sofr            flat-forward   flat-forward   us           10                 1              0.00000000
+treasury      treasury        flat-forward   flat-forward   weekends     11                 1              0.00000000
+
+market
+======
+as_of     2026-11-17
+calendar    weekends
+```
+
+Every other command works with one curve, chosen with `--curve-name`. That option is required
+when a set has more than one curve, and with the pair it defaults to `projection`. Bonds are
+discounted on the chosen curve's discount curve. Priced against the 3M curve, a bond is
+therefore priced on SOFR:
+
+```console
+$ for c in sofr term-sofr-3m treasury; do echo "--- $c"; fit bond price --maturity 2036-11-15 --coupon 4.25 --curve-set examples/data/usd_curves.csv --asof 2026-11-17 --curve-name $c --format csv | grep -E '^clean_price,'; done
+--- sofr
+clean_price,102.463656476
+--- term-sofr-3m
+clean_price,102.463656476
+--- treasury
+clean_price,99.9846191584
+```
+
+The file format and selection rules are in [ADR 0017](../adr/0017-curve-sets.md).
+
+## 9. Machine-readable output
 
 Every command accepts `--format csv` or `--format json`. Text tables are rounded for reading;
 CSV and JSON carry full precision.
@@ -358,7 +559,7 @@ tenor  date              years  zero_cc_pct  zero_sa_pct  par_sa_pct  fwd_inst_p
 10Y    2036-11-17  10.00821918   4.24170945   4.28700938  4.25000000    4.91504639  0.65408395
 ```
 
-## 9. When inputs are wrong
+## 10. When inputs are wrong
 
 Errors go to standard error, name the file and line, and leave standard output empty. Data
 errors exit with code 1 and command-line mistakes with code 2, so scripts can tell them apart.

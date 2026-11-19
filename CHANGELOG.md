@@ -22,6 +22,44 @@ with the reason and the size of the effect.
   and against hand calculations. See
   [ADR 0014](docs/adr/0014-monotone-convex-interpolation.md). The default interpolation is
   still `flat-forward`, and no existing output changes.
+- `--extrapolation flat-forward|flat-zero` on every command that builds a curve, choosing how
+  the curve continues beyond its last pillar. `flat-forward` holds the instantaneous forward at
+  the last pillar, as QuantLib's interpolated curves do. `flat-zero` holds the last zero rate.
+  The default keeps each scheme's existing behaviour: `flat-zero` for `linear-zero` and
+  `cubic-zero`, `flat-forward` otherwise. Validated against QuantLib 1.44 out to 50 years. See
+  [ADR 0015](docs/adr/0015-selectable-extrapolation.md).
+- `fit curve build` reports the extrapolation in its summary (`extrapolation` row/field). This
+  is an additive output change, and no existing value changes.
+- Multi-curve construction. `--discount-curve FILE --projection-curve FILE` bootstraps a
+  projection curve, such as 3M Term SOFR, on an OIS discount curve. Its swaps' floating legs
+  are projected on the projection curve and every cash flow is discounted on the discount
+  curve. `fit curve query` and `fit curve forwards` report the projection curve. `fit curve
+  build` reports both curves (`curves`, `market` and `nodes` tables). Bonds discount on the
+  discount curve. Validated against QuantLib 1.44's dual-curve `SwapRateHelper` bootstrap to
+  2e-12. See [ADR 0016](docs/adr/0016-multi-curve-construction.md).
+- Curve sets. `--curve-set FILE` builds any number of named curves from a CSV of
+  `name,quotes[,discount,interp,extrapolation,calendar,spot_lag]`, each after the curve that
+  discounts it. `--curve-name NAME` selects the curve a command uses, with `discount` or
+  `projection` for the pair. Bonds discount on the selected curve's discount curve. Example
+  `examples/data/usd_curves.csv`. See [ADR 0017](docs/adr/0017-curve-sets.md).
+- `irs` quote type: a fixed vs term-rate swap, by default annual ACT/360 fixed against
+  quarterly floating periods. The new `float_frequency` column sets the floating periods.
+- Example projection curve `examples/data/usd_term_sofr_3m.csv`.
+
+### Fixed
+
+- `swap` quotes accrue each fixed period between business-day adjusted dates, as ISDA swaps
+  do. Previously the periods ran between unadjusted dates, while payments were adjusted.
+  Bootstrapped SOFR discount factors now agree with QuantLib's `OISRateHelper` to 5e-13.
+  Before the fix they differed by up to 1.5e-4.
+
+### Numerical changes
+
+- Curves built from `swap` quotes change wherever a fixed-leg accrual date falls on a
+  non-business day. On `examples/data/usd_sofr.csv` (T+2, US calendar) the 2Y pillar zero rate
+  moves +0.50bp and the 7Y +0.28bp, and every other pillar by less than 0.04bp. A 10Y 4.25% bond
+  priced off that curve moves -0.0015 per 100. Curves without `swap` quotes, such as the example
+  Treasury curve, are unchanged. `par` quotes keep the bond convention of unadjusted accrual.
 
 ## [0.1.0] - 2026-11-17
 
