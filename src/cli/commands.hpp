@@ -4,6 +4,7 @@
 #include "fit/bond/analytics.hpp"
 #include "fit/bond/bond.hpp"
 #include "fit/curve/bootstrap.hpp"
+#include "fit/curve/curve_set.hpp"
 #include "fit/curve/yield_curve.hpp"
 #include "fit/io/table.hpp"
 #include "fit/time/calendar.hpp"
@@ -33,8 +34,11 @@ std::vector<Command> portfolio_commands();
 
 // ---- Shared option groups and their loaders ----------------------------------------------------
 
-/// `--curve --asof --interp --calendar --holidays --spot-lag`.
-std::vector<OptionSpec> curve_options(bool required);
+/// A curve source (`--curve`, `--discount-curve` with `--projection-curve`, or `--curve-set`)
+/// and `--asof --interp --extrapolation --calendar --holidays --spot-lag`. With `required`, a
+/// curve source and `--asof` must be given; with `select`, `--curve-name` picks the curve the
+/// command uses.
+std::vector<OptionSpec> curve_options(bool required, bool select = true);
 /// `--maturity --coupon --frequency --daycount --issue --settle --settle-days --no-eom`.
 std::vector<OptionSpec> bond_options();
 /// `--price --yield --zspread`.
@@ -43,16 +47,20 @@ std::vector<OptionSpec> key_tenor_options();
 
 std::vector<OptionSpec> operator+(std::vector<OptionSpec> a, const std::vector<OptionSpec>& b);
 
-/// A bootstrapped curve together with the inputs it was built from.
+/// The curves a command works with (ADRs 0016 and 0017).
 struct Market {
     Date as_of;
     Calendar calendar;
-    BootstrapResult bootstrap;
-    CurvePtr curve;
+    std::vector<NamedCurve> curves; ///< in build order: each after its discount curve
+    bool multi_curve = false;       ///< built from the discount/projection pair or a curve set
+    CurvePtr curve;    ///< the selected curve (`--curve-name`), which curve commands report
+    CurvePtr discount; ///< the curve that discounts it, and every bond
 };
 
 Calendar load_calendar(const Args& args);
-Market load_market(const Args& args);
+/// Builds every curve of the market. With `select`, also resolves `--curve-name` into
+/// `curve` and `discount`; otherwise those are left empty.
+Market load_market(const Args& args, bool select = true);
 /// Loads the market when `--curve` was given.
 std::optional<Market> load_optional_market(const Args& args);
 

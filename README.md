@@ -46,7 +46,7 @@ bullet and zero-coupon bonds, single-curve bootstrapping) and done carefully. Se
 
 | Area | Capabilities |
 |------|--------------|
-| **Yield curves** | Bootstrap a zero curve from deposits, swaps, par bond yields and zero rates. Five interpolation schemes (`flat-forward`, `linear-zero`, `cubic-zero`, `monotone-cubic`, and Hagan-West `monotone-convex` for continuous, positive forwards). Exact repricing of every input, reported per instrument. Zero, par, forward and instantaneous forward rates at any tenor or date; forward strips; forward-implied future curves. |
+| **Yield curves** | Bootstrap a zero curve from deposits, OIS and term-rate swaps, par bond yields and zero rates. Multi-curve: bootstrap a term-rate projection curve on an OIS discount curve. Five interpolation schemes (`flat-forward`, `linear-zero`, `cubic-zero`, `monotone-cubic`, and Hagan-West `monotone-convex` for continuous, positive forwards). Flat-forward or flat-zero extrapolation beyond the last pillar. Exact repricing of every input, reported per instrument. Zero, par, forward and instantaneous forward rates at any tenor or date; forward strips; forward-implied future curves. |
 | **Bond valuation** | Price from yield, yield from price, price off a curve with a z-spread, implied z-spread from a price. Accrued interest, clean and dirty prices, cashflow schedules with discount factors. Six day-count conventions, short first coupons, month-end rolls, business-day adjusted payments. |
 | **Risk** | Macaulay and modified duration, convexity, DV01. Effective duration and convexity and key-rate DV01s by bump-and-reprice on a user-defined tenor ladder. |
 | **Forecasting** | Horizon analysis: projected price and total return to any horizon under an unchanged curve or realised forwards, with parallel shocks and curve twists. Return attribution into coupon income, roll-down, curve move and reinvestment. |
@@ -97,6 +97,7 @@ curve
 =====
 as_of                     2026-11-17
 interpolation           flat-forward
+extrapolation           flat-forward
 calendar                    weekends
 nodes                             11
 bootstrap_passes                   1
@@ -226,7 +227,7 @@ Option groups shared across commands:
 
 | Group | Options |
 |-------|---------|
-| Curve | `--curve FILE` `--asof DATE` `--interp flat-forward\|linear-zero\|cubic-zero\|monotone-cubic\|monotone-convex` `--calendar none\|weekends\|us` `--holidays FILE` `--spot-lag DAYS` |
+| Curve | `--curve FILE`, or `--discount-curve FILE --projection-curve FILE`, or `--curve-set FILE`; `--curve-name NAME` (not on `curve build`); `--asof DATE` `--interp flat-forward\|linear-zero\|cubic-zero\|monotone-cubic\|monotone-convex` `--extrapolation flat-forward\|flat-zero` `--calendar none\|weekends\|us` `--holidays FILE` `--spot-lag DAYS` |
 | Bond | `--maturity DATE` `--coupon PCT` `--frequency 1\|2\|4\|12` `--daycount DC` `--issue DATE` `--settle DATE` `--settle-days N` `--no-eom` |
 | Mark | one of `--price PX` (clean), `--yield PCT`, `--zspread BP`; none means "on the curve, no spread" |
 | Risk | `--key-tenors LIST` `--bump-bp BP` |
@@ -252,10 +253,35 @@ par,10Y,4.25
 
 | Column | Required | Meaning |
 |--------|----------|---------|
-| `type` | yes | `deposit`, `swap`, `par` or `zero` |
+| `type` | yes | `deposit`, `swap` (OIS), `irs` (fixed vs term rate), `par` or `zero` |
 | `tenor` | yes | tenor (`3M`, `10Y`) or maturity date |
 | `rate` | yes | quote in percent |
-| `daycount`, `frequency`, `settle_days` | no | override the quote type's conventions |
+| `daycount`, `frequency`, `settle_days` | no | override the quote type's conventions (fixed leg for swaps) |
+| `float_frequency` | no | `irs` only: floating periods a year (default 4, a 3M rate) |
+
+With `--discount-curve` and `--projection-curve`, the projection file's swaps are priced with
+floating legs on the projection curve and all cash flows discounted on the discount curve.
+`par` quotes are not allowed there. Bonds are always discounted on the discount curve.
+
+**Curve sets** (`--curve-set`) name any number of curves, each from its own quotes file:
+
+```csv
+name,quotes,discount,calendar,spot_lag
+sofr,usd_sofr.csv,,us,2
+term-sofr-3m,usd_term_sofr_3m.csv,sofr,us,2
+treasury,usd_treasury.csv,,weekends,0
+```
+
+| Column | Required | Meaning |
+|--------|----------|---------|
+| `name` | yes | the curve's name, used by `--curve-name` |
+| `quotes` | yes | quotes file, relative to the set file |
+| `discount` | no | the curve that discounts it; empty for a curve that discounts itself |
+| `interp`, `extrapolation`, `calendar`, `spot_lag` | no | override the command line for this curve |
+
+`--curve-name` picks the curve a command uses; bonds discount on that curve's discount curve.
+`fit curve build` reports every curve. With `--curve` the curve is named `curve`, and with the
+pair the curves are `discount` and `projection` (the default).
 
 **Positions and trades** (`--portfolio`, `--trades`):
 
@@ -349,8 +375,9 @@ v0.1 is an MVP. The main things it does not do, each scheduled in the
 
 - **Instruments:** fixed-rate bullet and zero-coupon bonds only. No floaters, callables,
   amortisers, inflation-linked bonds or bills on a discount basis.
-- **Curves:** one curve for projection and discounting; no futures, no multi-curve OIS
-  discounting, no parametric fits. Extrapolation beyond the last pillar is simplistic.
+- **Curves:** a projection curve is built on a given discount curve, not jointly with it;
+  no futures, FRAs or basis swaps, no parametric fits. Extrapolation beyond the last pillar is flat (forward or
+  zero rate), with no ultimate forward rate.
 - **Yields and spreads:** street-convention yield and z-spread only; no G-spread, asset-swap
   spread or OAS.
 - **Risk:** sensitivities are to zero-rate bumps, not to par market quotes; no credit spread

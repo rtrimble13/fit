@@ -72,13 +72,12 @@ roadmap item where noted.
 
 | Area | Limitation | Addressed in |
 |------|------------|--------------|
-| Curve construction | One curve serves both projection and discounting; no OIS-discounted multi-curve build | v0.2 |
+| Curve construction | Projection curves are built in sequence on their discount curve, not jointly; no instruments that tie curves together (basis swaps) | v0.2 |
 | Curve construction | No futures, FRAs or basis swaps; no turn-of-year or meeting-date handling | v0.2 |
 | Curve construction | `swap` quotes assume an annual fixed leg and a single-curve floating leg | v0.2 |
 | Curve construction | Exact bootstrap only; no smoothing or parametric fit | v0.2 |
 | Interpolation | The default, `flat-forward`, has forwards that are discontinuous at nodes, and `cubic-zero` can oscillate; `monotone-convex` avoids both but is not yet the default | v0.2 |
-| Extrapolation | Outside the pillar range the zero rate (or, for the log-discount schemes, the last forward rate) is simply held flat | v0.2 |
-| Curve construction | Swap and par-bond accrual periods use unadjusted dates; only payment dates are business-day adjusted | v0.2 |
+| Extrapolation | Beyond the last pillar the zero rate or the last forward is held flat, selectable with `--extrapolation`; no ultimate-forward-rate method | Not scheduled |
 | Calendars | Only weekends-only, a rule-based US government bond calendar and user-supplied holiday files; the rule-based calendar knows only a handful of historical ad hoc market closures | v0.2 |
 | Instruments | Fixed-rate bullets and zeros only | v0.3 |
 | Yield conventions | Street convention only; no US Treasury final-period simple yield, no money-market or discount yields for bills | v0.3 |
@@ -119,10 +118,10 @@ The following are outside the intended scope of `fit` and are not planned:
 |------|-------------|
 | Monotone convex interpolation | Hagan–West monotone convex scheme, with continuous positive forwards; candidate new default after validation (requires an ADR superseding the default in ADR 0007). *Scheme available as `monotone-convex` ([ADR 0014](adr/0014-monotone-convex-interpolation.md)); the default decision is outstanding.* |
 | Parametric fitting | Nelson–Siegel and Nelson–Siegel–Svensson least-squares fit to bond prices or yields, with fit diagnostics (per-instrument residuals, RMSE), as a complement to exact bootstrap |
-| Multi-curve construction | Separate discount (OIS) and projection curves; dual-curve bootstrap of term-rate swaps; curve sets addressable by name |
+| Multi-curve construction | Separate discount (OIS) and projection curves; dual-curve bootstrap of term-rate swaps; curve sets addressable by name. *Delivered: dual-curve bootstrap and `irs` quotes ([ADR 0016](adr/0016-multi-curve-construction.md)), curve sets and `--curve-name` ([ADR 0017](adr/0017-curve-sets.md)).* |
 | Additional instruments for construction | Interest-rate futures with convexity adjustment, FRAs, swaps with explicit fixed/floating leg conventions, basis swaps |
 | Turn-of-year and jumps | Explicit jump pillars; step-function overlay for central-bank meeting dates |
-| Extrapolation choices | Flat forward and flat zero extrapolation, selectable and documented |
+| Extrapolation choices | Flat forward and flat zero extrapolation, selectable and documented. *Delivered: `--extrapolation` ([ADR 0015](adr/0015-selectable-extrapolation.md)).* |
 | Calendars | TARGET, UK, Japan and joint calendars; data-driven holiday tables with effective dates; calendar validation against published schedules |
 | Curve analytics | Par curve and forward curve output grids, curve differencing between two dates or two builds, rich/cheap residuals of bonds against a fitted curve |
 | Curve persistence | Save a built curve and reload it without re-bootstrapping |
