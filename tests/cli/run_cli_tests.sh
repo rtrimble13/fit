@@ -60,9 +60,9 @@ expect_err 'has no cashflows after 2040-01-01'
 expect_exit 1 curve build --curve /no/such.csv --asof 2026-11-17
 expect_err "cannot open '/no/such.csv'"
 BAD="$(mktemp)"
-printf 'type,tenor,rate\npar,2Y,3.9\nfuture,5Y,4.0\n' >"$BAD"
+printf 'type,tenor,rate\npar,2Y,3.9\ncap,5Y,4.0\n' >"$BAD"
 expect_exit 1 curve build --curve "$BAD" --asof 2026-11-17
-expect_err ":3: unknown quote type 'future'"
+expect_err ":3: unknown quote type 'cap'"
 printf 'type,tenor,rate\npar,2Y,3.9\npar,24M,4.0\n' >"$BAD"
 expect_exit 1 curve build --curve "$BAD" --asof 2026-11-17
 expect_err 'mature on the same date'
@@ -128,6 +128,24 @@ expect_exit 1 curve build --discount-curve "$DATA/usd_sofr.csv" --projection-cur
 expect_err "^fit: error: curve 'projection': quote '1Y': a par bond quote prices on the curve itself"
 expect_exit 0 curve query "${DUAL[@]}" --curve-name discount --tenors 2Y --format csv
 expect_out '^2Y,2028-11-17,[^,]*,3\.720'        # the OIS curve's 2Y zero (projection: 3.790)
+
+# ---- short-end instruments: futures and FRAs -----------------------------------------------
+expect_exit 0 curve build --curve "$DATA/usd_sofr_futures.csv" "${SOFR[@]}"
+expect_out '^Z6 +future +2027-03-17 +0\.3288 +4\.2100 '     # IMM to IMM; quote is 100 - price
+expect_out '^max_repricing_error_bp +0\.00000000$'
+expect_exit 0 curve build --discount-curve "$DATA/usd_sofr.csv" --projection-curve "$DATA/usd_term_sofr_3m_fra.csv" "${SOFR[@]}"
+expect_out '^projection +3x6 +fra +2027-05-19 .* 3\.9700 .* 0\.000000$'
+BAD="$(mktemp)"
+printf 'type,tenor,rate\nfuture,Z6,4.21\n' >"$BAD"
+expect_exit 1 curve build --curve "$BAD" "${SOFR[@]}"
+expect_err ":2: a future is quoted by its price \(column price\), not by a rate"; expect_no_out
+printf 'type,tenor,rate,price\ndeposit,3M,4.2,99\n' >"$BAD"
+expect_exit 1 curve build --curve "$BAD" "${SOFR[@]}"
+expect_err ':2: the price and convexity_bp columns apply to future quotes only'
+printf 'type,tenor,rate\nfra,6x3,4.0\n' >"$BAD"
+expect_exit 1 curve build --curve "$BAD" "${SOFR[@]}"
+expect_err ":2: FRA '6x3': end month must follow the start month"
+rm -f "$BAD"
 
 # ---- curve sets: any number of named curves -----------------------------------------------
 SET=(--curve-set "$DATA/usd_curves.csv" --asof 2026-11-17)

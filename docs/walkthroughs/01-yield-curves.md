@@ -36,6 +36,8 @@ periods:
 | `deposit` | cash deposit or bill, simple interest | ACT/360 |
 | `swap` | par OIS swap, fixed vs compounded overnight rate | annual fixed leg, ACT/360 |
 | `irs` | par swap, fixed vs a term rate such as 3M (section 8) | annual ACT/360 fixed, quarterly floating |
+| `fra` | forward-rate agreement, tenor `AxB` months (`3x6`) | ACT/360, dates as QuantLib's `FraRateHelper` |
+| `future` | quarterly IMM future such as 3M SOFR, tenor its code (`Z6`), quoted in a `price` column with an optional `convexity_bp` | IMM date to IMM date, ACT/360 (section 7) |
 | `par` | coupon bond priced at 100 | semi-annual, ACT/ACT ICMA |
 | `zero` | continuously compounded zero rate | ACT/365F, starts on the as-of date |
 
@@ -374,6 +376,40 @@ Monday the 20th and accrues for 367 days. Calendars available are `none`,
 `weekends` (default) and `us`; `--holidays FILE` adds dates of your own (one ISO date per
 line) to any of them.
 
+### Futures at the short end
+
+The short end of an OIS curve is often built from futures rather than deposits.
+`usd_sofr_futures.csv` replaces the 3M and 6M deposits and the 1Y swap of `usd_sofr.csv` with
+five 3M SOFR futures:
+
+```text
+type,tenor,rate,price,convexity_bp
+future,Z6,,95.79,0.1
+future,H7,,96.02,0.3
+```
+
+A future is quoted by its price, and `convexity_bp` is how far the futures rate sits above the
+forward rate. Each contract covers its IMM period, from the third Wednesday of its month to the
+third Wednesday three months later, so Z6 runs from 16 December 2026 to 17 March 2027:
+
+```console
+$ fit curve build --curve examples/data/usd_sofr_futures.csv --asof 2026-11-17 --spot-lag 2 --calendar us | sed -n "/^nodes$/,\$p" | head -11
+nodes
+=====
+tenor  type     pillar        years  quote_pct  zero_cc_pct  discount  error_bp
+-----  -------  ----------  -------  ---------  -----------  --------  --------
+1W     deposit  2026-11-27   0.0274     4.3300       4.3880  0.998799  0.000000
+1M     deposit  2026-12-21   0.0932     4.3100       4.3631  0.995944  0.000000
+Z6     future   2027-03-17   0.3288     4.2100       4.2739  0.986047  0.000000
+H7     future   2027-06-16   0.5781     3.9800       4.1610  0.976233  0.000000
+M7     future   2027-09-15   0.8274     3.8000       4.0608  0.966960  0.000000
+U7     future   2027-12-15   1.0767     3.7000       3.9828  0.958024  0.000000
+Z7     future   2028-03-15   1.3260     3.6700       3.9277  0.949251  0.000000
+```
+
+`quote_pct` shows the futures rate, 100 minus the price. fit has no convexity model, so the
+adjustments come from your own source. They grow with the time to the contract.
+
 ## 8. A projection curve on an OIS discount curve
 
 A term rate such as 3M Term SOFR is not the rate swaps are discounted at; collateralised swaps
@@ -465,6 +501,20 @@ start,fwd_simple_pct
 2028-11-17,3.65504067679
 2029-11-17,3.83949898821
 2030-11-17,3.84051343345
+```
+
+FRAs fill the projection curve between its fixing and its first swap. `usd_term_sofr_3m_fra.csv`
+replaces the 1Y swap with `3x6`, `6x9` and `9x12` FRAs, each the 3M rate starting that many
+months after spot:
+
+```console
+$ fit curve build --discount-curve examples/data/usd_sofr.csv --projection-curve examples/data/usd_term_sofr_3m_fra.csv --asof 2026-11-17 --spot-lag 2 --calendar us --format csv | grep -E "^(curve,tenor|projection,(3M|3x6|6x9|9x12|2Y),)" | cut -d, -f2,3,4,6,8
+tenor,type,pillar,quote_pct,discount
+3M,deposit,2027-02-19,4.29,0.988921119873
+3x6,fra,2027-05-19,3.97,0.979309469461
+6x9,fra,2027-08-19,3.78,0.969939850505
+9x12,fra,2027-11-19,3.7,0.960854437986
+2Y,irs,2028-11-20,3.81,0.926635335208
 ```
 
 Bonds are always discounted on the discount curve: a fixed-rate bond priced with the pair has
@@ -565,8 +615,8 @@ Errors go to standard error, name the file and line, and leave standard output e
 errors exit with code 1 and command-line mistakes with code 2, so scripts can tell them apart.
 
 ```console
-$ printf 'type,tenor,rate\npar,2Y,3.90\nfuture,5Y,4.00\n' > /tmp/bad.csv; fit curve build --curve /tmp/bad.csv --asof 2026-11-17
-fit: error: /tmp/bad.csv:3: unknown quote type 'future' (expected deposit, swap, par or zero)
+$ printf 'type,tenor,rate\npar,2Y,3.90\ncap,5Y,4.00\n' > /tmp/bad.csv; fit curve build --curve /tmp/bad.csv --asof 2026-11-17
+fit: error: /tmp/bad.csv:3: unknown quote type 'cap' (expected deposit, swap, irs, fra, future, par or zero)
 ```
 
 (exit code 1)

@@ -1,0 +1,16 @@
+# Illustrative USD 3M Term SOFR projection curve as of 2026-11-17 with FRAs at the short end (not
+# real market data). "3x6" is the 3M rate starting 3 months after spot. Build on the SOFR curve:
+#   --discount-curve usd_sofr.csv --projection-curve usd_term_sofr_3m_fra.csv --spot-lag 2 --calendar us
+type,tenor,rate
+deposit,3M,4.29
+fra,3x6,3.97
+fra,6x9,3.78
+fra,9x12,3.70
+irs,2Y,3.81
+irs,3Y,3.76
+irs,5Y,3.79
+irs,7Y,3.88
+irs,10Y,4.01
+irs,15Y,4.16
+irs,20Y,4.20
+irs,30Y,4.10

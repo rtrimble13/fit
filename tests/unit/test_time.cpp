@@ -45,6 +45,24 @@ TEST_CASE("date: month arithmetic clamps and honours end-of-month") {
     CHECK(Date(2026, 11, 17).add(Period::parse("2w")) == Date(2026, 12, 1));
 }
 
+TEST_CASE("date: third Wednesday (IMM dates)") {
+    // Hand-checked against a calendar: 1 Dec 2026 is a Tuesday, 1 Mar 2027 a Monday, 1 Jan 2025 a
+    // Wednesday (so its third Wednesday is the 15th), and 19 Jun 2024 was both the third
+    // Wednesday and Juneteenth.
+    CHECK(third_wednesday(2026, 12) == Date(2026, 12, 16));
+    CHECK(third_wednesday(2027, 3) == Date(2027, 3, 17));
+    CHECK(third_wednesday(2027, 6) == Date(2027, 6, 16));
+    CHECK(third_wednesday(2027, 9) == Date(2027, 9, 15));
+    CHECK(third_wednesday(2025, 1) == Date(2025, 1, 15));
+    CHECK(third_wednesday(2024, 6) == Date(2024, 6, 19));
+    for (int month = 1; month <= 12; ++month) {
+        const Date d = third_wednesday(2031, month);
+        CHECK(d.weekday() == Weekday::Wednesday);
+        CHECK(d.day() >= 15);
+        CHECK(d.day() <= 21);
+    }
+}
+
 TEST_CASE("period: parsing") {
     CHECK(Period::parse("18M").length == 18);
     CHECK(Period::parse("18M").unit == TimeUnit::Months);

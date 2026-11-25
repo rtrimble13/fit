@@ -444,7 +444,7 @@ TEST_CASE("bootstrap: quote conventions") {
     CHECK(dated.start == kAsOf);
 
     CHECK_THROWS_AS(make_quote(kAsOf, QuoteType::Par, "2026-11-01", 0.04, conventions), Error);
-    CHECK_THROWS_AS(parse_quote_type("future"), Error);
+    CHECK_THROWS_AS(parse_quote_type("cap"), Error);
 }
 
 TEST_CASE("bootstrap: swap periods accrue between adjusted dates") {
@@ -579,6 +579,130 @@ TEST_CASE("bootstrap: projection curve inputs are checked") {
         Date(2026, 11, 18), std::vector{1.0}, std::vector{0.04}, InterpolationMethod::FlatForward);
     CHECK_THROWS_WITH(bootstrap(kAsOf, term_sofr_quotes(), us, options),
                       "bootstrap: the discount curve is as of 2026-11-18, not 2026-11-17");
+}
+
+std::vector<Quote> sofr_futures_quotes() {
+    return load_quotes(std::string(FIT_EXAMPLES_DIR) + "/usd_sofr_futures.csv", kAsOf,
+                       sofr_conventions());
+}
+
+TEST_CASE("bootstrap: FRA quote conventions") {
+    // As QuantLib's FraRateHelper: start A months after spot (T+2: 2026-11-19), end B - A months
+    // after the start, both modified following.
+    const QuoteConventions conventions = sofr_conventions();
+    const Quote fra = make_quote(kAsOf, QuoteType::Fra, "3x6", 0.0397, conventions);
+    CHECK(parse_quote_type("FRA") == QuoteType::Fra);
+    CHECK(fra.start == Date(2027, 2, 19));
+    CHECK(fra.pillar == Date(2027, 5, 19));
+    CHECK(fra.day_count == DayCount::Act360);
+    CHECK(make_quote(kAsOf, QuoteType::Fra, "0x3", 0.04, conventions).start == Date(2026, 11, 19));
+    CHECK(make_quote(kAsOf, QuoteType::Fra, "9X12", 0.04, conventions).pillar ==
+          Date(2027, 11, 19));
+    for (const char* bad : {"6x3", "3x3", "3-6", "x6", "3x", "3x6M"}) {
+        CAPTURE(bad);
+        CHECK_THROWS_AS(make_quote(kAsOf, QuoteType::Fra, bad, 0.04, conventions), Error);
+    }
+}
+
+TEST_CASE("bootstrap: futures quote conventions") {
+    // A quarterly IMM contract's period runs from the third Wednesday of its month to the third
+    // Wednesday three months later (QuantLib's SofrFutureRateHelper gives the same dates).
+    const QuoteConventions conventions = sofr_conventions();
+    const Quote z6 =
+        make_quote(kAsOf, QuoteType::Future, "Z6", 0.0421, conventions, "", 0, 0, 1e-5);
+    CHECK(parse_quote_type("futures") == QuoteType::Future);
+    CHECK(z6.start == Date(2026, 12, 16));
+    CHECK(z6.pillar == Date(2027, 3, 17));
+    CHECK(z6.convexity == 1e-5);
+    // A one-digit year is the first year from the as-of year on that ends in it.
+    CHECK(make_quote(kAsOf, QuoteType::Future, "H7", 0.04, conventions).start == Date(2027, 3, 17));
+    CHECK(make_quote(kAsOf, QuoteType::Future, "u27", 0.04, conventions).pillar ==
+          Date(2027, 12, 15));
+    // ...across a decade: in November 2029, H0 is March 2030 (1 Mar 2030 is a Friday).
+    CHECK(make_quote(Date(2029, 11, 1), QuoteType::Future, "H0", 0.04, conventions).start ==
+          Date(2030, 3, 20));
+    // March 2026 has passed: the contract is in or past its period, so it is rejected rather
+    // than read as 2036.
+    CHECK_THROWS_WITH(make_quote(kAsOf, QuoteType::Future, "H6", 0.04, conventions),
+                      "futures contract 'H6': its period starts 2026-03-18, before the as-of "
+                      "date; a contract already in its period needs past fixings, which fit "
+                      "does not take");
+    for (const char* bad : {"Q7", "Z", "Z123", "ZX", "2026-12-16"}) {
+        CAPTURE(bad);
+        CHECK_THROWS_AS(make_quote(kAsOf, QuoteType::Future, bad, 0.04, conventions), Error);
+    }
+    CHECK_THROWS_WITH(
+        make_quote(kAsOf, QuoteType::Deposit, "3M", 0.04, conventions, "", 0, 0, 1e-5),
+        "quote '3M': a convexity adjustment applies to futures only");
+}
+
+TEST_CASE("bootstrap: FRA and futures rates on a curve") {
+    // On a flat 4% continuously compounded ACT/365F curve, the simple ACT/360 forward over
+    // [s, e] is (exp(0.04 (e - s) / 365) - 1) * 360 / (e - s). A future adds its convexity
+    // adjustment: futures rate = forward + adjustment.
+    const InterpolatedCurve curve(kAsOf, {1.0}, {0.04}, InterpolationMethod::FlatForward);
+    const auto forward = [](int days) {
+        return (std::exp(0.04 * days / 365.0) - 1.0) * 360.0 / days;
+    };
+    const Quote fra = make_quote(kAsOf, QuoteType::Fra, "3x6", 0.0, sofr_conventions());
+    CHECK(implied_quote_rate(fra, curve, Calendar()) ==
+          doctest::Approx(forward(Date(2027, 5, 19) - Date(2027, 2, 19))).epsilon(1e-14));
+    const Quote z6 =
+        make_quote(kAsOf, QuoteType::Future, "Z6", 0.0, sofr_conventions(), "", 0, 0, 2e-5);
+    CHECK(implied_quote_rate(z6, curve, Calendar()) ==
+          doctest::Approx(forward(Date(2027, 3, 17) - Date(2026, 12, 16)) + 2e-5).epsilon(1e-14));
+}
+
+TEST_CASE("bootstrap: futures are quoted by price, other quotes by rate") {
+    const std::vector<Quote> quotes = sofr_futures_quotes();
+    REQUIRE(quotes.size() == 15);
+    // future,Z6,,95.79,0.1: rate (100 - 95.79) / 100, convexity 0.1bp.
+    CHECK(quotes[2].type == QuoteType::Future);
+    CHECK(quotes[2].rate == doctest::Approx(0.0421).epsilon(1e-15));
+    CHECK(quotes[2].convexity == doctest::Approx(1e-5).epsilon(1e-15));
+    CHECK(quotes[0].convexity == 0.0);
+}
+
+TEST_CASE("bootstrap: a futures strip and FRAs reprice and match QuantLib") {
+    // Reference: QuantLib 1.44 PiecewiseLogLinearDiscount. The futures curve uses
+    // DepositRateHelper, SofrFutureRateHelper(price, month, year, Quarterly, convexity) and
+    // OISRateHelper; the FRA curve uses DepositRateHelper, FraRateHelper(rate, A, B, 2, US
+    // government bond calendar, modified following, no EOM, ACT/360) and SwapRateHelper on the
+    // SOFR OIS curve, as in "projection discount factors match QuantLib dual-curve". All
+    // pillars and four off-pillar dates agree to 1.7e-12.
+    const Calendar us = sofr_conventions().calendar;
+    const double tol = 1e-10;
+    const BootstrapResult futures = bootstrap(kAsOf, sofr_futures_quotes(), us);
+    CHECK(futures.max_error < 1e-12);
+    CHECK(futures.curve->discount(Date(2027, 3, 17)) ==
+          doctest::Approx(0.986047066459).epsilon(tol));
+    CHECK(futures.curve->discount(Date(2028, 3, 15)) ==
+          doctest::Approx(0.949250985011).epsilon(tol));
+    CHECK(futures.curve->discount(Date(2028, 11, 20)) ==
+          doctest::Approx(0.927955028424).epsilon(tol));
+    CHECK(futures.curve->discount(Date(2027, 8, 3)) ==
+          doctest::Approx(0.971330467456).epsilon(tol));
+    CHECK(futures.curve->discount(Date(2028, 1, 10)) ==
+          doctest::Approx(0.955508856169).epsilon(tol));
+    // The convexity adjustment lowers the forward: over Z7's period the curve's forward is the
+    // futures rate 3.67% less 1.4bp.
+    const double z7 =
+        (futures.curve->discount(Date(2027, 12, 15)) / futures.curve->discount(Date(2028, 3, 15)) -
+         1.0) *
+        360.0 / (Date(2028, 3, 15) - Date(2027, 12, 15));
+    CHECK(z7 == doctest::Approx(0.0367 - 0.00014).epsilon(1e-13));
+
+    BootstrapOptions options;
+    options.discount = bootstrap(kAsOf, sofr_quotes(), us).curve;
+    const BootstrapResult fras =
+        bootstrap(kAsOf,
+                  load_quotes(std::string(FIT_EXAMPLES_DIR) + "/usd_term_sofr_3m_fra.csv", kAsOf,
+                              sofr_conventions()),
+                  us, options);
+    CHECK(fras.max_error < 1e-12);
+    CHECK(fras.curve->discount(Date(2027, 5, 19)) == doctest::Approx(0.979309469461).epsilon(tol));
+    CHECK(fras.curve->discount(Date(2027, 11, 19)) == doctest::Approx(0.960854437985).epsilon(tol));
+    CHECK(fras.curve->discount(Date(2027, 10, 1)) == doctest::Approx(0.965682764085).epsilon(tol));
 }
 
 TEST_CASE("bootstrap: a single swap reprices and matches the closed form") {
