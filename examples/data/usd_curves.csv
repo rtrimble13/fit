@@ -1,7 +1,10 @@
 # Illustrative USD curve set as of 2026-11-17: each row names a curve, its quotes file (relative
-# to this file) and the curve that discounts it (empty: itself). Optional columns interp,
-# extrapolation, calendar and spot_lag override the command line for that curve.
-name,quotes,discount,calendar,spot_lag
-sofr,usd_sofr.csv,,us,2
-term-sofr-3m,usd_term_sofr_3m.csv,sofr,us,2
-treasury,usd_treasury.csv,,weekends,0
+# to this file) and the curve that discounts it (empty: itself). The reference column names the
+# curve whose index the other leg of a curve's basis swaps pays (empty: its discount curve).
+# Optional columns interp, extrapolation, calendar and spot_lag override the command line for
+# that curve.
+name,quotes,discount,reference,calendar,spot_lag
+sofr,usd_sofr.csv,,,us,2
+term-sofr-3m,usd_term_sofr_3m.csv,sofr,,us,2
+term-sofr-6m,usd_term_sofr_6m.csv,sofr,term-sofr-3m,us,2
+treasury,usd_treasury.csv,,,weekends,0

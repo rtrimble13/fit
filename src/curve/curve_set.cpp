@@ -42,9 +42,23 @@ std::vector<NamedCurve> build_curve_set(Date as_of, const std::vector<CurveSpec>
         require(discounts_itself(s) || find(s.discount) != specs.end(),
                 "curve set: curve '" + s.name + "' is discounted on unknown curve '" + s.discount +
                     "' (curves: " + names_of(specs) + ")");
+        if (s.reference.empty()) {
+            continue;
+        }
+        require(s.reference != s.name, "curve set: curve '" + s.name +
+                                           "' cannot be the reference curve of its own basis "
+                                           "quotes");
+        require(find(s.reference) != specs.end(),
+                "curve set: curve '" + s.name + "' names unknown reference curve '" + s.reference +
+                    "' (curves: " + names_of(specs) + ")");
+        require(std::any_of(s.quotes.begin(), s.quotes.end(),
+                            [](const Quote& q) { return q.type == QuoteType::Basis; }),
+                "curve set: curve '" + s.name + "' names reference curve '" + s.reference +
+                    "' but has no basis quotes");
     }
 
-    // Repeatedly build the first curve, in the given order, whose discount curve is built.
+    // Repeatedly build the first curve, in the given order, whose discount and reference curves
+    // are built.
     std::vector<NamedCurve> built;
     std::vector<bool> done(specs.size(), false);
     const auto built_curve = [&](const std::string& name) -> const NamedCurve* {
@@ -57,11 +71,14 @@ std::vector<NamedCurve> build_curve_set(Date as_of, const std::vector<CurveSpec>
         for (std::size_t i = 0; i < specs.size() && !progressed; ++i) {
             const CurveSpec& s = specs[i];
             const NamedCurve* discount = discounts_itself(s) ? nullptr : built_curve(s.discount);
-            if (done[i] || (!discounts_itself(s) && discount == nullptr)) {
+            const NamedCurve* reference = s.reference.empty() ? nullptr : built_curve(s.reference);
+            if (done[i] || (!discounts_itself(s) && discount == nullptr) ||
+                (!s.reference.empty() && reference == nullptr)) {
                 continue;
             }
             BootstrapOptions options = s.options;
             options.discount = discount != nullptr ? discount->bootstrap.curve : nullptr;
+            options.reference = reference != nullptr ? reference->bootstrap.curve : nullptr;
             try {
                 built.push_back({s.name, discounts_itself(s) ? s.name : s.discount, s.calendar,
                                  bootstrap(as_of, s.quotes, s.calendar, options)});
@@ -78,7 +95,9 @@ std::vector<NamedCurve> build_curve_set(Date as_of, const std::vector<CurveSpec>
                     cycle += (cycle.empty() ? "" : ", ") + specs[i].name;
                 }
             }
-            throw Error("curve set: curves " + cycle + " are discounted on each other in a cycle");
+            throw Error("curve set: curves " + cycle +
+                        " depend on each other in a cycle (through their discount or reference "
+                        "curves)");
         }
     }
     return built;
@@ -87,8 +106,8 @@ std::vector<NamedCurve> build_curve_set(Date as_of, const std::vector<CurveSpec>
 std::vector<CurveSpec> load_curve_set(const std::string& path, Date as_of,
                                       const CurveSetDefaults& defaults) {
     const CsvTable csv = CsvTable::read(path);
-    csv.require_columns_in(
-        {"name", "quotes", "discount", "interp", "extrapolation", "calendar", "spot_lag"});
+    csv.require_columns_in({"name", "quotes", "discount", "reference", "interp", "extrapolation",
+                            "calendar", "spot_lag"});
     const std::filesystem::path base = std::filesystem::path(path).parent_path();
     std::vector<CurveSpec> specs;
     for (std::size_t i = 0; i < csv.size(); ++i) {
@@ -96,6 +115,7 @@ std::vector<CurveSpec> load_curve_set(const std::string& path, Date as_of,
             CurveSpec s;
             s.name = csv.at(i, "name");
             s.discount = csv.get(i, "discount").value_or("");
+            s.reference = csv.get(i, "reference").value_or("");
             s.calendar = defaults.calendar;
             if (const auto calendar = csv.get(i, "calendar")) {
                 s.calendar = Calendar::from_name(*calendar);

@@ -490,7 +490,7 @@ TEST_CASE("bootstrap: irs quote conventions") {
     CHECK(make_quote(kAsOf, QuoteType::Irs, "2Y", 0.0381, conventions, "30/360", 2, 2)
               .float_frequency == 2);
     CHECK_THROWS_WITH(make_quote(kAsOf, QuoteType::Swap, "2Y", 0.0374, conventions, "", 0, 4),
-                      "quote '2Y': float_frequency applies to irs quotes only");
+                      "quote '2Y': float_frequency applies to irs and basis quotes only");
 }
 
 TEST_CASE("swap rate: floating legs on a projection curve") {
@@ -703,6 +703,187 @@ TEST_CASE("bootstrap: a futures strip and FRAs reprice and match QuantLib") {
     CHECK(fras.curve->discount(Date(2027, 5, 19)) == doctest::Approx(0.979309469461).epsilon(tol));
     CHECK(fras.curve->discount(Date(2027, 11, 19)) == doctest::Approx(0.960854437985).epsilon(tol));
     CHECK(fras.curve->discount(Date(2027, 10, 1)) == doctest::Approx(0.965682764085).epsilon(tol));
+}
+
+std::vector<Quote> example_quotes(const std::string& file) {
+    return load_quotes(std::string(FIT_EXAMPLES_DIR) + "/" + file, kAsOf, sofr_conventions());
+}
+
+// The example basis curves: 3M Term SOFR from SOFR / 3M basis swaps on the SOFR curve (whose
+// index is the default reference), and 6M Term SOFR from 3M / 6M basis swaps against the
+// irs-built 3M curve.
+struct BasisCurves {
+    CurvePtr sofr;
+    CurvePtr term_3m; // from irs quotes
+    BootstrapResult basis_3m;
+    BootstrapResult basis_6m;
+};
+
+BasisCurves basis_curves(InterpolationMethod method) {
+    const Calendar us = sofr_conventions().calendar;
+    BasisCurves c;
+    c.term_3m = term_sofr_curve(method, &c.sofr).curve;
+    BootstrapOptions options{method};
+    options.discount = c.sofr;
+    c.basis_3m = bootstrap(kAsOf, example_quotes("usd_term_sofr_3m_basis.csv"), us, options);
+    options.reference = c.term_3m;
+    c.basis_6m = bootstrap(kAsOf, example_quotes("usd_term_sofr_6m.csv"), us, options);
+    return c;
+}
+
+TEST_CASE("bootstrap: basis quote conventions") {
+    const QuoteConventions conventions = sofr_conventions();
+    const Quote basis = make_quote(kAsOf, QuoteType::Basis, "2Y", 0.0005, conventions);
+    CHECK(parse_quote_type("Basis") == QuoteType::Basis);
+    CHECK(to_string(QuoteType::Basis) == "basis");
+    CHECK(basis.start == Date(2026, 11, 19));  // spot, T+2
+    CHECK(basis.pillar == Date(2028, 11, 20)); // 2028-11-19 is a Sunday
+    CHECK(basis.day_count == DayCount::Act360);
+    CHECK(basis.frequency == 4);       // the reference leg: quarterly
+    CHECK(basis.float_frequency == 4); // this curve's leg: quarterly
+    const Quote six = make_quote(kAsOf, QuoteType::Basis, "2Y", 0.0005, conventions, "", 0, 2);
+    CHECK(six.frequency == 4);
+    CHECK(six.float_frequency == 2);
+}
+
+TEST_CASE("basis spread: floating legs on flat curves") {
+    // Flat curves, continuously compounded on ACT/365F from the as-of date: projection 5%,
+    // reference 4.5%, discount 4%. A 1Y basis swap from Thursday 2026-11-19 on business days
+    // only: the reference leg pays quarterly to 2027-02-19, 05-19, 08-19 and 11-19 with the
+    // spread accruing ACT/360; the projection leg pays semi-annually to 2027-05-19 and 11-19.
+    // Each coupon is worth DF(e) (P(s) / P(e) - 1), and the spread makes the legs equal.
+    const InterpolatedCurve projection(kAsOf, {1.0}, {0.05}, InterpolationMethod::FlatForward);
+    const InterpolatedCurve reference(kAsOf, {1.0}, {0.045}, InterpolationMethod::FlatForward);
+    const InterpolatedCurve discount(kAsOf, {1.0}, {0.04}, InterpolationMethod::FlatForward);
+    const Calendar weekends(Calendar::Rules::WeekendsOnly);
+    const auto t = [](Date d) { return (d - kAsOf) / 365.0; };
+    const auto leg = [&](double rate, const std::vector<Date>& dates) {
+        double value = 0.0;
+        for (std::size_t j = 1; j < dates.size(); ++j) {
+            value += std::exp(-0.04 * t(dates[j])) *
+                     (std::exp(rate * (t(dates[j]) - t(dates[j - 1]))) - 1.0);
+        }
+        return value;
+    };
+    const std::vector<Date> quarterly{Date(2026, 11, 19), Date(2027, 2, 19), Date(2027, 5, 19),
+                                      Date(2027, 8, 19), Date(2027, 11, 19)};
+    const std::vector<Date> semiannual{Date(2026, 11, 19), Date(2027, 5, 19), Date(2027, 11, 19)};
+    double annuity = 0.0;
+    for (std::size_t j = 1; j < quarterly.size(); ++j) {
+        annuity += (quarterly[j] - quarterly[j - 1]) / 360.0 * std::exp(-0.04 * t(quarterly[j]));
+    }
+    const double expected = (leg(0.05, semiannual) - leg(0.045, quarterly)) / annuity;
+    CHECK(expected > 0.0); // the projection index fixes above the reference
+    CHECK(basis_spread(projection, reference, discount, quarterly.front(), quarterly.back(), 4, 2,
+                       DayCount::Act360, weekends) == doctest::Approx(expected).epsilon(1e-15));
+    // The same index on both legs, paid at the same frequency, is worth no spread.
+    CHECK(basis_spread(reference, reference, discount, quarterly.front(), quarterly.back(), 4, 4,
+                       DayCount::Act360, weekends) == 0.0);
+    // A basis swap is two swaps with the same fixed leg, one on each index.
+    const auto swap = [&](const YieldCurve& index, int float_frequency) {
+        return swap_rate(index, discount, quarterly.front(), quarterly.back(), 4, DayCount::Act360,
+                         float_frequency, weekends);
+    };
+    CHECK(basis_spread(projection, reference, discount, quarterly.front(), quarterly.back(), 4, 2,
+                       DayCount::Act360, weekends) ==
+          doctest::Approx(swap(projection, 2) - swap(reference, 4)).epsilon(1e-14));
+}
+
+TEST_CASE("bootstrap: basis curves reprice under every interpolation method") {
+    for (const auto method : kAllMethods) {
+        CAPTURE(to_string(method));
+        const BasisCurves c = basis_curves(method);
+        const Calendar us = sofr_conventions().calendar;
+        CHECK(c.basis_3m.max_error < 1e-12);
+        CHECK(c.basis_6m.max_error < 1e-12);
+        for (const Quote& q : c.basis_6m.quotes) {
+            CHECK(implied_quote_rate(q, *c.basis_6m.curve, *c.sofr, us, c.term_3m.get()) ==
+                  doctest::Approx(q.rate).epsilon(1e-10));
+        }
+        // The basis-built 3M curve is close to the irs-built one, whose implied basis the
+        // example's spreads round to 0.1bp: within 0.5bp of zero rate at 10 years.
+        CHECK(std::fabs(c.basis_3m.curve->zero_rate(Date(2036, 11, 19)) -
+                        c.term_3m->zero_rate(Date(2036, 11, 19))) < 0.5e-4);
+    }
+}
+
+TEST_CASE("bootstrap: basis curves match QuantLib") {
+    // Reference: QuantLib 1.44, PiecewiseLogLinearDiscount (flat-forward) and PiecewiseLinearZero
+    // (linear-zero), the SOFR and irs-built 3M curves as in "projection discount factors match
+    // QuantLib dual-curve". The 3M curve: DepositRateHelper(3M) and
+    // OvernightIborBasisSwapRateHelper(spread, tenor, 2, US government bond calendar, modified
+    // following, no EOM, SOFR forecast on the OIS curve, 3M index, discount = OIS). The 6M curve:
+    // DepositRateHelper(6M) and IborIborBasisSwapRateHelper(spread, tenor, 2, same calendar,
+    // modified following, no EOM, base = 3M index on the irs-built curve, other = 6M index,
+    // discount = OIS, bootstrapBaseCurve = false). Both pay the spread on the base leg, each leg
+    // at its index's frequency. Pillars and off-pillar dates agree to 1.9e-12.
+    const double tol = 1e-10;
+    const BasisCurves flat = basis_curves(InterpolationMethod::FlatForward);
+    const auto& f3 = *flat.basis_3m.curve;
+    CHECK(f3.discount(Date(2027, 11, 19)) == doctest::Approx(0.960596843807).epsilon(tol));
+    CHECK(f3.discount(Date(2036, 11, 19)) == doctest::Approx(0.669125944294).epsilon(tol));
+    CHECK(f3.discount(Date(2056, 11, 20)) == doctest::Approx(0.295943410650).epsilon(tol));
+    CHECK(f3.discount(Date(2030, 1, 15)) == doctest::Approx(0.888292419749).epsilon(tol));
+    const auto& f6 = *flat.basis_6m.curve;
+    CHECK(f6.discount(Date(2027, 5, 19)) == doctest::Approx(0.979386457807).epsilon(tol));
+    CHECK(f6.discount(Date(2027, 11, 19)) == doctest::Approx(0.960163909537).epsilon(tol));
+    CHECK(f6.discount(Date(2036, 11, 19)) == doctest::Approx(0.665479891808).epsilon(tol));
+    CHECK(f6.discount(Date(2056, 11, 20)) == doctest::Approx(0.291537980275).epsilon(tol));
+    CHECK(f6.discount(Date(2027, 8, 3)) == doctest::Approx(0.971400494626).epsilon(tol));
+    CHECK(f6.discount(Date(2041, 6, 30)) == doctest::Approx(0.538502410451).epsilon(tol));
+    const BasisCurves linear = basis_curves(InterpolationMethod::LinearZero);
+    CHECK(linear.basis_3m.curve->discount(Date(2050, 2, 2)) ==
+          doctest::Approx(0.379329513728).epsilon(tol));
+    CHECK(linear.basis_6m.curve->discount(Date(2031, 11, 19)) ==
+          doctest::Approx(0.825697913217).epsilon(tol));
+    CHECK(linear.basis_6m.curve->discount(Date(2050, 2, 2)) ==
+          doctest::Approx(0.374778428634).epsilon(tol));
+}
+
+TEST_CASE("bootstrap: the reference curve of basis quotes") {
+    const Calendar us = sofr_conventions().calendar;
+    const std::vector<Quote> quotes = example_quotes("usd_term_sofr_3m_basis.csv");
+    const BasisCurves c = basis_curves(InterpolationMethod::FlatForward);
+    // Naming the discount curve as the reference is the default.
+    BootstrapOptions options;
+    options.discount = c.sofr;
+    options.reference = c.sofr;
+    const BootstrapResult explicit_reference = bootstrap(kAsOf, quotes, us, options);
+    for (const Date d : {Date(2028, 11, 20), Date(2041, 6, 30)}) {
+        CHECK(explicit_reference.curve->discount(d) == c.basis_3m.curve->discount(d));
+    }
+    // A curve that discounts itself can still price basis swaps against a reference curve.
+    BootstrapOptions self;
+    self.reference = c.sofr;
+    const BootstrapResult own = bootstrap(kAsOf, quotes, us, self);
+    CHECK(own.max_error < 1e-12);
+    for (const Quote& q : own.quotes) {
+        CHECK(implied_quote_rate(q, *own.curve, *own.curve, us, c.sofr.get()) ==
+              doctest::Approx(q.rate).epsilon(1e-10));
+    }
+    // Without a discount or a reference curve, a basis quote has nothing to price against.
+    const std::string none = "quote '1Y': a basis swap prices against a reference curve, and this "
+                             "curve has none: build it on a discount curve, the default reference, "
+                             "or name a reference curve in a curve set";
+    CHECK_THROWS_WITH(bootstrap(kAsOf, quotes, us), none.c_str());
+    CHECK_THROWS_WITH(implied_quote_rate(quotes[1], *c.sofr, us), none.c_str());
+    // The reference curve must be as of the same date.
+    self.reference = std::make_shared<InterpolatedCurve>(
+        Date(2026, 11, 18), std::vector{1.0}, std::vector{0.04}, InterpolationMethod::FlatForward);
+    CHECK_THROWS_WITH(bootstrap(kAsOf, quotes, us, self),
+                      "bootstrap: the reference curve is as of 2026-11-18, not 2026-11-17");
+}
+
+TEST_CASE("bootstrap: basis swaps are quoted by spread") {
+    const std::vector<Quote> quotes = example_quotes("usd_term_sofr_6m.csv");
+    REQUIRE(quotes.size() == 10);
+    // basis,1Y,,4.6,2: 4.6bp on the quarterly reference leg, against a semi-annual leg.
+    CHECK(quotes[1].type == QuoteType::Basis);
+    CHECK(quotes[1].rate == doctest::Approx(4.6e-4).epsilon(1e-15));
+    CHECK(quotes[1].frequency == 4);
+    CHECK(quotes[1].float_frequency == 2);
+    CHECK(quotes[0].type == QuoteType::Deposit);
+    CHECK(quotes[0].rate == doctest::Approx(0.0414).epsilon(1e-15));
 }
 
 TEST_CASE("bootstrap: a single swap reprices and matches the closed form") {

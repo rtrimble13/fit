@@ -84,7 +84,8 @@ TEST_CASE("curve set: invalid sets are rejected with the curves named") {
     CHECK_THROWS_WITH(
         build_curve_set(kAsOf, {spec("ok", "usd_sofr.csv", ""), spec("a", "usd_sofr.csv", "c"),
                                 spec("b", "usd_sofr.csv", "a"), spec("c", "usd_sofr.csv", "b")}),
-        "curve set: curves a, b, c are discounted on each other in a cycle");
+        "curve set: curves a, b, c depend on each other in a cycle (through their discount or "
+        "reference curves)");
     // Bootstrap failures name the curve when there are several, as for a par quote on a
     // projection curve; a lone curve reports the error unchanged.
     CurveSpec par = spec("tsy", "usd_sofr.csv", "ois");
@@ -97,20 +98,84 @@ TEST_CASE("curve set: invalid sets are rejected with the curves named") {
     CHECK_THROWS_WITH(build_curve_set(kAsOf, {empty}), "bootstrap: no quotes supplied");
 }
 
+CurveSpec with_reference(CurveSpec s, std::string reference) {
+    s.reference = std::move(reference);
+    return s;
+}
+
+TEST_CASE("curve set: basis curves are built after their reference curve") {
+    // The 6M curve is listed first and references the 3M curve, which is built on the OIS curve:
+    // the set builds ois, 3m, then 6m.
+    const std::vector<NamedCurve> built = build_curve_set(
+        kAsOf, {with_reference(spec("6m", "usd_term_sofr_6m.csv", "ois"), "3m"),
+                spec("3m", "usd_term_sofr_3m.csv", "ois"), spec("ois", "usd_sofr.csv", "")});
+    REQUIRE(built.size() == 3);
+    CHECK(built[0].name == "ois");
+    CHECK(built[1].name == "3m");
+    CHECK(built[2].name == "6m");
+    CHECK(built[2].discount_name == "ois");
+
+    // Identical to building the 6M curve on the OIS curve with the 3M curve as reference.
+    BootstrapOptions options;
+    options.discount = built[0].bootstrap.curve;
+    options.reference = built[1].bootstrap.curve;
+    const BootstrapResult direct =
+        bootstrap(kAsOf, load_quotes(kData + "/usd_term_sofr_6m.csv", kAsOf, sofr_conventions()),
+                  sofr_conventions().calendar, options);
+    for (std::size_t i = 0; i < direct.quotes.size(); ++i) {
+        CHECK(built[2].bootstrap.curve->zero_rates()[i] == direct.curve->zero_rates()[i]);
+    }
+
+    // Without a reference the basis quotes price against the discount curve, as with the pair.
+    const std::vector<NamedCurve> pair = build_curve_set(
+        kAsOf, {spec("ois", "usd_sofr.csv", ""), spec("3m", "usd_term_sofr_3m_basis.csv", "ois")});
+    CHECK(pair[1].bootstrap.max_error < 1e-12);
+}
+
+TEST_CASE("curve set: reference curves are checked") {
+    const CurveSpec ois = spec("ois", "usd_sofr.csv", "");
+    const CurveSpec three = spec("3m", "usd_term_sofr_3m.csv", "ois");
+    const CurveSpec six = spec("6m", "usd_term_sofr_6m.csv", "ois");
+    CHECK_THROWS_WITH(build_curve_set(kAsOf, {ois, with_reference(six, "1m")}),
+                      "curve set: curve '6m' names unknown reference curve '1m' (curves: ois, 6m)");
+    CHECK_THROWS_WITH(build_curve_set(kAsOf, {ois, with_reference(six, "6m")}),
+                      "curve set: curve '6m' cannot be the reference curve of its own basis "
+                      "quotes");
+    CHECK_THROWS_WITH(
+        build_curve_set(
+            kAsOf, {ois, three, with_reference(spec("x", "usd_term_sofr_3m.csv", "ois"), "3m")}),
+        "curve set: curve 'x' names reference curve '3m' but has no basis quotes");
+    // A cycle through a reference: ois is discounted on 6m, whose basis references ois.
+    CHECK_THROWS_WITH(
+        build_curve_set(kAsOf, {spec("ois", "usd_sofr.csv", "6m"), with_reference(six, "ois")}),
+        "curve set: curves ois, 6m depend on each other in a cycle (through their "
+        "discount or reference curves)");
+    // A curve with basis quotes, no discount curve and no reference has nothing to price
+    // against; the error names the curve.
+    CHECK_THROWS_WITH(build_curve_set(kAsOf, {ois, spec("6m", "usd_term_sofr_6m.csv", "")}),
+                      "curve '6m': quote '1Y': a basis swap prices against a reference curve, "
+                      "and this curve has none: build it on a discount curve, the default "
+                      "reference, or name a reference curve in a curve set");
+}
+
 TEST_CASE("curve set: the example file resolves paths and per-curve conventions") {
     CurveSetDefaults defaults;
     defaults.method = InterpolationMethod::MonotoneConvex;
     const std::vector<CurveSpec> specs = load_curve_set(kData + "/usd_curves.csv", kAsOf, defaults);
-    REQUIRE(specs.size() == 3);
+    REQUIRE(specs.size() == 4);
     CHECK(specs[0].name == "sofr");
     CHECK(specs[0].discount.empty());
     CHECK(specs[0].calendar.name() == "us");
     CHECK(specs[0].quotes.front().start == Date(2026, 11, 19)); // spot_lag 2
     CHECK(specs[1].name == "term-sofr-3m");
     CHECK(specs[1].discount == "sofr");
-    CHECK(specs[2].name == "treasury");
-    CHECK(specs[2].calendar.name() == "weekends");
-    CHECK(specs[2].quotes.front().start == kAsOf); // spot_lag 0
+    CHECK(specs[1].reference.empty());
+    CHECK(specs[2].name == "term-sofr-6m");
+    CHECK(specs[2].discount == "sofr");
+    CHECK(specs[2].reference == "term-sofr-3m");
+    CHECK(specs[3].name == "treasury");
+    CHECK(specs[3].calendar.name() == "weekends");
+    CHECK(specs[3].quotes.front().start == kAsOf); // spot_lag 0
     for (const CurveSpec& s : specs) {
         CHECK(s.options.method == InterpolationMethod::MonotoneConvex); // inherited
         CHECK_FALSE(s.options.extrapolation.has_value());

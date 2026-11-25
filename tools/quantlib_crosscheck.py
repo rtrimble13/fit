@@ -20,7 +20,8 @@ and linear-zero curves, whose QuantLib counterparts hold the instantaneous forwa
 
 The SOFR OIS curve is compared with OISRateHelper, and the 3M projection curve built on it with
 SwapRateHelper and an exogenous discounting curve (ADR 0016). Futures and FRAs are compared with
-SofrFutureRateHelper and FraRateHelper.
+SofrFutureRateHelper and FraRateHelper, and basis swaps with OvernightIborBasisSwapRateHelper
+and IborIborBasisSwapRateHelper.
 """
 import json
 import subprocess
@@ -191,5 +192,59 @@ fra=ql.PiecewiseLogLinearDiscount(a,rh,ql.Actual365Fixed())
 fradual=["--discount-curve","examples/data/usd_sofr.csv","--projection-curve","examples/data/usd_term_sofr_3m_fra.csv","--asof",asof,"--spot-lag","2","--calendar","us"]
 for n in fit("curve","build",*fradual)["nodes"]:
     if n["curve"]=="projection": cmp("fra curve df "+n["tenor"],n["discount"],fra.discount(D(n["pillar"])),1e-9)
+# Basis swaps (ADR 0019): the 3M curve from SOFR / 3M Term SOFR basis swaps on the SOFR curve
+# (OvernightIborBasisSwapRateHelper; the reference leg is the discount curve's index), and the
+# 6M curve from 3M / 6M basis swaps against the 3M curve (IborIborBasisSwapRateHelper). In both
+# the spread is paid on the reference (base) leg and each leg pays at its index's frequency.
+print("basis swaps")
+dates="2027-08-03,2030-01-15,2041-06-30,2050-02-02"
+for interp,cls in [("flat-forward",ql.PiecewiseLogLinearDiscount),("linear-zero",ql.PiecewiseLinearZero)]:
+    base=cls(a,ois,ql.Actual365Fixed())
+    bh=ql.YieldTermStructureHandle(base)
+    on_f=ql.OvernightIndex("SOFR-GB",0,ql.USDCurrency(),cal,ql.Actual360(),bh)
+    # 3M from SOFR basis swaps.
+    bq=[("deposit","3M",4.29),("basis","1Y",5.9),("basis","2Y",6.9),("basis","3Y",7.9),("basis","5Y",7.9),("basis","7Y",7.9),
+        ("basis","10Y",7.9),("basis","15Y",7.9),("basis","20Y",7.9),("basis","30Y",7.9)]
+    i3=ql.IborIndex("TSOFR3M",ql.Period("3M"),2,ql.USDCurrency(),cal,ql.ModifiedFollowing,False,ql.Actual360())
+    hs=[]
+    for t,ten,r in bq:
+        if t=="deposit":
+            hs.append(ql.DepositRateHelper(ql.QuoteHandle(ql.SimpleQuote(r/100)),ql.Period(ten),2,cal,ql.ModifiedFollowing,False,ql.Actual360()))
+        else:
+            hs.append(ql.OvernightIborBasisSwapRateHelper(ql.QuoteHandle(ql.SimpleQuote(r/1e4)),ql.Period(ten),2,cal,ql.ModifiedFollowing,False,on_f,i3,bh))
+    c3=cls(a,hs,ql.Actual365Fixed())
+    b3=["--discount-curve","examples/data/usd_sofr.csv","--projection-curve","examples/data/usd_term_sofr_3m_basis.csv","--asof",asof,"--spot-lag","2","--calendar","us","--interp",interp]
+    for n in fit("curve","build",*b3)["nodes"]:
+        if n["curve"]=="projection": cmp(interp+" sofr basis df "+n["tenor"],n["discount"],c3.discount(D(n["pillar"])),1e-9)
+    for n in fit("curve","query",*b3,"--dates",dates)["curve"]:
+        cmp(interp+" sofr basis interp df "+n["date"],n["discount"],c3.discount(D(n["date"])),1e-9)
+    # 6M from 3M / 6M basis swaps against the 3M curve of the example set.
+    tq=[("deposit","3M",4.29),("irs","1Y",4.02),("irs","2Y",3.81),("irs","3Y",3.76),("irs","5Y",3.79),("irs","7Y",3.88),
+        ("irs","10Y",4.01),("irs","15Y",4.16),("irs","20Y",4.20),("irs","30Y",4.10)]
+    th=[]
+    for t,ten,r in tq:
+        rqh=ql.QuoteHandle(ql.SimpleQuote(r/100))
+        if t=="deposit":
+            th.append(ql.DepositRateHelper(rqh,ql.Period(ten),2,cal,ql.ModifiedFollowing,False,ql.Actual360()))
+        else:
+            th.append(ql.SwapRateHelper(rqh,ql.Period(ten),cal,ql.Annual,ql.ModifiedFollowing,ql.Actual360(),i3,
+                                        ql.QuoteHandle(),ql.Period(0,ql.Days),bh,ql.nullInt(),ql.Pillar.LastRelevantDate,ql.Date(),False,False))
+    t3=cls(a,th,ql.Actual365Fixed())
+    i3f=ql.IborIndex("TSOFR3M",ql.Period("3M"),2,ql.USDCurrency(),cal,ql.ModifiedFollowing,False,ql.Actual360(),ql.YieldTermStructureHandle(t3))
+    i6=ql.IborIndex("TSOFR6M",ql.Period("6M"),2,ql.USDCurrency(),cal,ql.ModifiedFollowing,False,ql.Actual360())
+    sq6=[("deposit","6M",4.14),("basis","1Y",4.6),("basis","2Y",4.9),("basis","3Y",5.1),("basis","5Y",5.3),("basis","7Y",5.4),
+         ("basis","10Y",5.5),("basis","15Y",5.5),("basis","20Y",5.4),("basis","30Y",5.2)]
+    h6=[]
+    for t,ten,r in sq6:
+        if t=="deposit":
+            h6.append(ql.DepositRateHelper(ql.QuoteHandle(ql.SimpleQuote(r/100)),ql.Period(ten),2,cal,ql.ModifiedFollowing,False,ql.Actual360()))
+        else:
+            h6.append(ql.IborIborBasisSwapRateHelper(ql.QuoteHandle(ql.SimpleQuote(r/1e4)),ql.Period(ten),2,cal,ql.ModifiedFollowing,False,i3f,i6,bh,False))
+    c6=cls(a,h6,ql.Actual365Fixed())
+    s6=["--curve-set","examples/data/usd_curves.csv","--asof",asof,"--interp",interp]
+    for n in fit("curve","build",*s6)["nodes"]:
+        if n["curve"]=="term-sofr-6m": cmp(interp+" 3s6s basis df "+n["tenor"],n["discount"],c6.discount(D(n["pillar"])),1e-9)
+    for n in fit("curve","query",*s6,"--curve-name","term-sofr-6m","--dates",dates)["curve"]:
+        cmp(interp+" 3s6s basis interp df "+n["date"],n["discount"],c6.discount(D(n["date"])),1e-9)
 print(f"{failures} failure(s)")
 sys.exit(1 if failures else 0)

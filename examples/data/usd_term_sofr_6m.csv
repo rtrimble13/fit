@@ -1,0 +1,15 @@
+# Illustrative USD 6M Term SOFR projection curve as of 2026-11-17 (not real market data). The
+# deposit is the 6M fixing. Each basis swap pays 3M Term SOFR plus spread_bp quarterly against
+# 6M Term SOFR semi-annually (float_frequency 2), both ACT/360, discounted on SOFR. The 3M leg
+# projects on the curve named in the reference column of usd_curves.csv (term-sofr-3m).
+type,tenor,rate,spread_bp,float_frequency
+deposit,6M,4.14,,
+basis,1Y,,4.6,2
+basis,2Y,,4.9,2
+basis,3Y,,5.1,2
+basis,5Y,,5.3,2
+basis,7Y,,5.4,2
+basis,10Y,,5.5,2
+basis,15Y,,5.5,2
+basis,20Y,,5.4,2
+basis,30Y,,5.2,2
