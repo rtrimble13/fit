@@ -1,0 +1,63 @@
+# Publishes a GitHub release when VERSION on main names a version that has no tag yet.
+#
+# A release happens when a pull request that bumps VERSION is merged. The tag is v<version>, at
+# the merge commit. The release carries the Linux x86-64 binary archive, its SHA-256 checksum,
+# and the version's CHANGELOG.md section as notes. See docs/versioning-and-releases.md.
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - VERSION
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Never run two releases at once; never cancel one half-way.
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release the version in VERSION
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      CC: gcc-13
+      CXX: g++-13
+    steps:
+      - name: Check out
+        # Pinned to a commit, because this job can write to the repository.
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Full history and tags, so that an already-released version is recognised.
+          fetch-depth: 0
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake ninja-build g++-13
+
+      - name: Validate VERSION and CHANGELOG.md
+        run: python3 tools/release.py validate
+
+      - name: Build and test (release preset)
+        run: |
+          cmake --preset release
+          cmake --build --preset release
+          ctest --preset release --output-on-failure
+
+      - name: Check that the binary reports VERSION
+        run: test "$(build/release/fit --version)" = "fit $(cat VERSION)"
+
+      - name: Show the release plan
+        run: python3 tools/release.py release --dry-run
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/release.py release

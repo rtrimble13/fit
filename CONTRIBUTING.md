@@ -39,6 +39,8 @@ Related documents:
 | Ninja | any recent |
 | clang-format | 18 (the version CI uses) |
 | clang-tidy | 18 (optional locally) |
+| Python | 3.10+, standard library only: the release tool and its tests (skipped by `ctest` if absent) |
+| make | optional: `make help` lists shortcuts such as `make check` and `make versions` |
 
 Linux is the supported development platform. There are no third-party libraries to install: the
 only vendored code is the doctest header in `third_party/`, and the build needs no network
@@ -57,6 +59,9 @@ Or in one line:
 ```sh
 cmake --preset dev && cmake --build --preset dev && ctest --preset dev
 ```
+
+`make check` runs that, the formatting check and the version gate: what CI checks on a pull
+request, with one compiler.
 
 For an optimised build:
 
@@ -130,9 +135,15 @@ Development is trunk-based with short-lived branches.
    `fix/eom-schedule-february`. Keep branches short-lived; rebase on `main` rather than merging
    `main` in.
 3. **Develop with the `dev` preset** so sanitizers run on every test.
-4. **Open a pull request** early as a draft if you want feedback. It must meet
+4. **Version the change.** If it touches what fit ships (`src/`, `include/`, `CMakeLists.txt`,
+   `CMakePresets.json`), bump `VERSION` as
+   [docs/versioning-and-releases.md](docs/versioning-and-releases.md) describes, and add a
+   `## [x.y.z] - YYYY-MM-DD` section to `CHANGELOG.md`. Run `make versions`. Changes that ship
+   nothing need no bump.
+5. **Open a pull request** early as a draft if you want feedback. It must meet
    [PR_STANDARDS.md](docs/PR_STANDARDS.md) before review is requested.
-5. **Squash merge** once approved and green. The PR title becomes the commit on `main`.
+6. **Squash merge** once approved and green. The PR title becomes the commit on `main`. If the
+   version was bumped, the release workflow then tags and publishes it; nobody tags by hand.
 
 ## Coding standards
 
@@ -304,7 +315,7 @@ Documentation is part of the change, not a follow-up.
 | A calculation or convention | `docs/METHODOLOGY.md` |
 | A command, option, input schema or output column | `README.md` and the relevant walk-through in `docs/walkthroughs/` |
 | A user-visible feature | Add or extend a walk-through with a runnable example using `examples/data/` |
-| Anything user-visible | `CHANGELOG.md` under `[Unreleased]` |
+| Anything user-visible | `CHANGELOG.md`: the new version's section, or `[Unreleased]` for a change that ships nothing |
 | A methodology, dependency, layering or CLI-contract decision | A new ADR |
 | A limitation or planned item | `docs/ROADMAP.md` |
 
@@ -482,30 +493,25 @@ not edited; a changed decision gets a new ADR that supersedes the old one.
 
 ## Release process
 
-`fit` follows [Semantic Versioning](https://semver.org/). While the major version is 0, a minor
-release may contain breaking changes; they must be marked in the changelog. From 1.0 the CLI
-contract and public API are stable within a major version.
+Releases are continuous and automated
+([ADR 0018](docs/adr/0018-continuous-versioning-and-automated-releases.md)). The full rules are
+in [docs/versioning-and-releases.md](docs/versioning-and-releases.md). In short:
 
-Any release that changes a computed number for existing inputs must say so in a
-**Numerical changes** section of its changelog entry, with the reason and the size of the
-effect.
-
-To cut a release:
-
-1. Confirm `main` is green and the milestone's exit criteria in `docs/ROADMAP.md` are met.
-2. Open a release PR (`chore(release): vX.Y.Z`) that:
-   - sets the project version in the top-level `CMakeLists.txt`;
-   - moves `[Unreleased]` entries in `CHANGELOG.md` into a dated `[X.Y.Z]` section and updates
-     the comparison links;
-   - updates `docs/ROADMAP.md` status.
-3. Verify on the release PR: `dev` and `release` presets build and pass on both compilers, the
-   walk-through commands run and match the documented output, and `fit --version` reports the
-   new version.
-4. Squash-merge, then tag the merge commit `vX.Y.Z` (annotated tag) and push the tag.
-5. Publish release notes from the changelog section.
-
-Patch releases for defects are cut from `main` in the same way. A fix that changes numbers is
-never released silently, however small.
+- `fit` follows [Semantic Versioning](https://semver.org/). The version lives only in
+  [`VERSION`](VERSION). MAJOR covers incompatible CLI or API changes, and any change to
+  computed numbers for existing inputs. MINOR covers new capability, and PATCH covers
+  corrections that change no output. Before 1.0.0, MINOR also carries breaking and numerical
+  changes.
+- Every pull request that changes a shipped file bumps `VERSION` and adds a matching dated
+  section to `CHANGELOG.md`. The *Version and changelog* CI job enforces this; run
+  `make versions` locally.
+- A release that changes a computed number for existing inputs says so in a **Numerical
+  changes** section of its changelog entry, with the reason and the size of the effect. A fix
+  that changes numbers is never released silently, however small.
+- Merging to `main` releases the new version. The release workflow builds and tests it,
+  creates the tag `v<version>` and publishes a GitHub release with the Linux binary archive,
+  its checksum and the changelog section as notes. `make release-plan` previews that.
+- Tags are never moved or deleted. A bad release is fixed forward with a new version.
 
 ## Reporting issues
 

@@ -22,8 +22,9 @@ shift  clean_end  yield_end_pct  coupon_income    roll  curve_shift  reinvestmen
 50bp     96.5483         4.7256         4.2498  0.3266      -3.7158        0.0420     0.9027       0.903           0.903
 ```
 
-**Status:** v0.1.0, an MVP. The scope is deliberately narrow (single-currency, fixed-rate
-bullet and zero-coupon bonds, single-curve bootstrapping) and done carefully. See
+**Status:** pre-1.0; the current version is in [`VERSION`](VERSION), and every version is on the
+[releases page](https://github.com/rtrimble13/fit/releases). The scope is deliberately narrow
+(single-currency curves, fixed-rate bullet and zero-coupon bonds) and done carefully. See
 [Limitations](#limitations) and the [roadmap](docs/ROADMAP.md).
 
 ## Contents
@@ -55,6 +56,10 @@ bullet and zero-coupon bonds, single-curve bootstrapping) and done carefully. Se
 
 ## Build and install
 
+Each [release](https://github.com/rtrimble13/fit/releases) has a Linux x86-64 binary,
+`fit-<version>-linux-x86_64.tar.gz`, with a `.sha256` checksum. To use it, check it with
+`sha256sum -c` and unpack it. The binary is `fit-<version>/bin/fit`. To build from source:
+
 Requirements: a C++20 compiler (GCC 13+ or Clang 17+), CMake 3.24+ and Ninja, on Linux.
 There are no third-party runtime dependencies; the only vendored code is the
 [doctest](https://github.com/doctest/doctest) header used by the tests.
@@ -65,7 +70,7 @@ $ cmake --preset release
 $ cmake --build --preset release
 $ ctest --preset release
 $ build/release/fit --version
-fit 0.1.0
+fit 0.2.0
 ```
 
 Install to a prefix (optional):
@@ -370,7 +375,7 @@ The details and tolerances are in [METHODOLOGY.md](docs/METHODOLOGY.md#9-validat
 
 ## Limitations
 
-v0.1 is an MVP. The main things it does not do, each scheduled in the
+fit is pre-1.0. The main things it does not do, each scheduled in the
 [roadmap](docs/ROADMAP.md):
 
 - **Instruments:** fixed-rate bullet and zero-coupon bonds only. No floaters, callables,
@@ -397,10 +402,11 @@ advice; validate it against your own systems before relying on it.
 | [Walk-throughs](docs/walkthroughs/README.md) | Worked examples of every feature with real output |
 | [METHODOLOGY.md](docs/METHODOLOGY.md) | Conventions, formulas, tolerances and validation |
 | [Architecture decision records](docs/adr/README.md) | Why the tool is built the way it is |
-| [ROADMAP.md](docs/ROADMAP.md) | Planned work by release, known limitations, non-goals |
+| [ROADMAP.md](docs/ROADMAP.md) | Planned work by milestone, known limitations, non-goals |
+| [Versioning and releases](docs/versioning-and-releases.md) | What each version number means, the version gate, and how releases are published |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Development setup, coding and testing standards, how to add features |
 | [PR_STANDARDS.md](docs/PR_STANDARDS.md) | Pull request requirements and the numerical-change policy |
-| [CHANGELOG.md](CHANGELOG.md) | Release history |
+| [CHANGELOG.md](CHANGELOG.md) | Every version's changes, newest first |
 
 ## Project layout
 
@@ -419,8 +425,9 @@ tests/unit/       doctest unit tests
 tests/cli/        end-to-end command-line tests
 examples/data/    illustrative curves, portfolio and trades
 docs/             methodology, walk-throughs, ADRs, roadmap, PR standards
-tools/            development aids (QuantLib cross-check)
+tools/            development aids: release tool (versions, packaging), QuantLib cross-check
 third_party/      vendored doctest header (tests only)
+VERSION           the version: the single source for CMake, fit --version and releases
 ```
 
 All analytics live in the `fit_core` library; the executable only parses arguments and

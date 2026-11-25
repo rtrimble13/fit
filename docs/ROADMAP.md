@@ -1,9 +1,16 @@
 # Development Roadmap
 
 This roadmap describes what `fit` delivers today, what it deliberately does not, and the
-sequence in which capability will be added. It is organised by release theme rather than by
-date: releases ship when their exit criteria are met. Priorities are reviewed at each release
-and changes are made by pull request to this file.
+sequence in which capability will be added. It is organised by milestone rather than by date,
+and a milestone is reached when its exit criteria are met. Versions are separate from
+milestones. A new version is released on every merge that changes what fit ships
+([ADR 0018](adr/0018-continuous-versioning-and-automated-releases.md),
+[versioning and releases](versioning-and-releases.md)), so one milestone spans many versions.
+The exception is version 1.0.0, which is released when the stability commitment is met.
+Priorities are reviewed at each milestone, and changes are made by pull request to this file.
+
+Before ADR 0018 the milestones were labelled v0.1 to v0.5. Older documents, including accepted
+ADRs, use those labels: v0.1 is M1, v0.2 is M2, v0.3 is M3, v0.4 is M4 and v0.5 is M5.
 
 Methodology decisions referenced here are recorded in the [ADRs](adr/README.md).
 
@@ -18,18 +25,18 @@ Methodology decisions referenced here are recorded in the [ADRs](adr/README.md).
 
 ## Status summary
 
-| Release | Theme | Status |
-|---------|-------|--------|
-| v0.1 | MVP: curves, fixed-rate bonds, horizon analysis, portfolio and pre-trade | Delivered |
-| v0.2 | Curve depth | In progress |
-| v0.3 | Instrument coverage | Planned |
-| v0.4 | Portfolio and risk depth | Planned |
-| v0.5 | Integration and performance | Planned |
-| v1.0 | Stability commitment | Planned |
+| Milestone | Theme | Status |
+|-----------|-------|--------|
+| M1 | MVP: curves, fixed-rate bonds, horizon analysis, portfolio and pre-trade | Delivered (0.1.0) |
+| M2 | Curve depth | In progress (0.2.0 delivers part of it) |
+| M3 | Instrument coverage | Planned |
+| M4 | Portfolio and risk depth | Planned |
+| M5 | Integration and performance | Planned |
+| 1.0 | Stability commitment | Planned: released as version 1.0.0 |
 
 ---
 
-## v0.1 — MVP (delivered)
+## M1 — MVP (delivered in 0.1.0)
 
 ### Scope
 
@@ -67,29 +74,29 @@ Methodology decisions referenced here are recorded in the [ADRs](adr/README.md).
 
 ### Known limitations
 
-These are limitations of the delivered release, not defects. Each is addressed by a later
+These are limitations of the current version, not defects. Each is addressed by a later
 roadmap item where noted.
 
 | Area | Limitation | Addressed in |
 |------|------------|--------------|
-| Curve construction | Projection curves are built in sequence on their discount curve, not jointly; no instruments that tie curves together (basis swaps) | v0.2 |
-| Curve construction | No futures, FRAs or basis swaps; no turn-of-year or meeting-date handling | v0.2 |
-| Curve construction | `swap` quotes assume an annual fixed leg and a single-curve floating leg | v0.2 |
-| Curve construction | Exact bootstrap only; no smoothing or parametric fit | v0.2 |
-| Interpolation | The default, `flat-forward`, has forwards that are discontinuous at nodes, and `cubic-zero` can oscillate; `monotone-convex` avoids both but is not yet the default | v0.2 |
+| Curve construction | Projection curves are built in sequence on their discount curve, not jointly; no instruments that tie curves together (basis swaps) | M2 |
+| Curve construction | No futures, FRAs or basis swaps; no turn-of-year or meeting-date handling | M2 |
+| Curve construction | `swap` quotes assume an annual fixed leg and a single-curve floating leg | M2 |
+| Curve construction | Exact bootstrap only; no smoothing or parametric fit | M2 |
+| Interpolation | The default, `flat-forward`, has forwards that are discontinuous at nodes, and `cubic-zero` can oscillate; `monotone-convex` avoids both but is not yet the default | M2 |
 | Extrapolation | Beyond the last pillar the zero rate or the last forward is held flat, selectable with `--extrapolation`; no ultimate-forward-rate method | Not scheduled |
-| Calendars | Only weekends-only, a rule-based US government bond calendar and user-supplied holiday files; the rule-based calendar knows only a handful of historical ad hoc market closures | v0.2 |
-| Instruments | Fixed-rate bullets and zeros only | v0.3 |
-| Yield conventions | Street convention only; no US Treasury final-period simple yield, no money-market or discount yields for bills | v0.3 |
-| Settlement | No ex-dividend periods; no odd long first/last coupon handling beyond a short front stub | v0.3 |
-| Spreads | Z-spread only; no G-spread, I-spread, asset-swap spread or OAS | v0.3 |
-| Risk | Key-rate risk is to zero-rate bumps, not to par market quotes; no spread (CS01) or basis risk | v0.4 |
-| Scenarios | Parallel shifts and piecewise-linear twists typed on the command line; no named or file-based scenario sets | v0.4 |
-| Horizon analysis | No financing leg (repo); deterministic, constant-spread only | v0.4 |
-| Portfolio | Portfolio and pre-trade valuation use one settlement date for every position (default: the as-of date) rather than per-instrument settlement lags | v0.4 |
-| Portfolio | Single currency; no grouping/drill-down hierarchy; no benchmark-relative measures | v0.4 |
-| Data | File inputs only; no market-data or position-system connectivity | v0.5 |
-| Performance | Single-threaded; bump-and-reprice risk | v0.5 |
+| Calendars | Only weekends-only, a rule-based US government bond calendar and user-supplied holiday files; the rule-based calendar knows only a handful of historical ad hoc market closures | M2 |
+| Instruments | Fixed-rate bullets and zeros only | M3 |
+| Yield conventions | Street convention only; no US Treasury final-period simple yield, no money-market or discount yields for bills | M3 |
+| Settlement | No ex-dividend periods; no odd long first/last coupon handling beyond a short front stub | M3 |
+| Spreads | Z-spread only; no G-spread, I-spread, asset-swap spread or OAS | M3 |
+| Risk | Key-rate risk is to zero-rate bumps, not to par market quotes; no spread (CS01) or basis risk | M4 |
+| Scenarios | Parallel shifts and piecewise-linear twists typed on the command line; no named or file-based scenario sets | M4 |
+| Horizon analysis | No financing leg (repo); deterministic, constant-spread only | M4 |
+| Portfolio | Portfolio and pre-trade valuation use one settlement date for every position (default: the as-of date) rather than per-instrument settlement lags | M4 |
+| Portfolio | Single currency; no grouping/drill-down hierarchy; no benchmark-relative measures | M4 |
+| Data | File inputs only; no market-data or position-system connectivity | M5 |
+| Performance | Single-threaded; bump-and-reprice risk | M5 |
 | Platforms | Linux with GCC 13+ or Clang 17+ only | Cross-cutting |
 
 ### Non-goals
@@ -100,7 +107,7 @@ The following are outside the intended scope of `fit` and are not planned:
   settlement amounts or accounting valuations.
 - **Order or execution management.** No connectivity to trading venues.
 - **Derivatives pricing library.** No options, swaptions, caps/floors or stochastic rate
-  models beyond what bond optionality requires in v0.3.
+  models beyond what bond optionality requires in M3.
 - **Credit modelling.** No default, recovery or rating-migration models; credit is represented
   as a spread.
 - **Real-time streaming analytics.** The tool is request/response; it is not a tick-driven
@@ -110,7 +117,7 @@ The following are outside the intended scope of `fit` and are not planned:
 
 ---
 
-## v0.2 — Curve depth
+## M2 — Curve depth
 
 **Goal:** curves a rates desk would accept for marking and for forward-rate analysis.
 
@@ -132,7 +139,7 @@ The following are outside the intended scope of `fit` and are not planned:
 - Dual-curve bootstrap reprices all inputs within tolerance on both curves.
 - Each added calendar matches the published holiday schedule over a tested range of years.
 
-## v0.3 — Instrument coverage
+## M3 — Instrument coverage
 
 **Goal:** cover the instruments held in a typical government/credit bond book.
 
@@ -140,7 +147,7 @@ The following are outside the intended scope of `fit` and are not planned:
 |------|-------------|
 | Bills and money-market conventions | Discount yield, money-market yield, bond-equivalent yield; US Treasury convention for the final coupon period; simple-yield conventions |
 | Odd coupons and ex-dividend | Long and short first/last coupons; ex-dividend periods and negative accrued |
-| Floating-rate notes | Compounded-in-arrears overnight and term-rate FRNs, discount margin, spread duration; depends on v0.2 projection curves |
+| Floating-rate notes | Compounded-in-arrears overnight and term-rate FRNs, discount margin, spread duration; depends on the projection curves of M2, delivered in 0.2.0 |
 | Amortising and sinking-fund bonds | Principal schedules, weighted-average life, factor handling |
 | Callable and puttable bonds | Yield to call/put/worst; option-adjusted spread and effective duration on a short-rate lattice; requires a volatility input and an ADR for the model choice |
 | Inflation-linked bonds | Index ratio with lag and interpolation, real yield, inflation-adjusted accrued and settlement amount |
@@ -153,7 +160,7 @@ The following are outside the intended scope of `fit` and are not planned:
 - Yield conventions selectable explicitly; defaults unchanged for existing users unless an ADR
   says otherwise.
 
-## v0.4 — Portfolio and risk depth
+## M4 — Portfolio and risk depth
 
 **Goal:** risk a desk can hedge from and performance it can explain.
 
@@ -175,7 +182,7 @@ The following are outside the intended scope of `fit` and are not planned:
 - Attribution components sum to actual P&L with a reported, bounded residual.
 - VaR reproduces a hand-checkable reference case.
 
-## v0.5 — Integration and performance
+## M5 — Integration and performance
 
 **Goal:** fit into desk infrastructure and scale to large books.
 
@@ -194,7 +201,7 @@ The following are outside the intended scope of `fit` and are not planned:
 - Parallel runs produce results identical to serial runs.
 - Published benchmark numbers for representative portfolio sizes.
 
-## v1.0 — Stability commitment
+## 1.0 — Stability commitment (version 1.0.0)
 
 - CLI contract (commands, options, input schemas, output field names, exit codes) frozen under
   semantic versioning; breaking changes only in major releases.
@@ -206,13 +213,13 @@ The following are outside the intended scope of `fit` and are not planned:
 
 ## Cross-cutting workstreams
 
-These run alongside the feature releases.
+These run alongside the milestones.
 
 ### Validation corpus
 - A versioned set of instruments, curves and expected results from independent sources,
   covering every convention combination supported, including stubs, month-ends, leap years and
   negative rates.
-- Extended with each release; treated as a release gate from v0.2.
+- Extended with each milestone; a gate for reaching M2 and every later milestone.
 
 ### Benchmarks
 - Repeatable micro- and macro-benchmarks: curve build, single-bond analytics, portfolio
@@ -226,7 +233,9 @@ These run alongside the feature releases.
 - Property-based tests for curve and schedule invariants.
 
 ### Packaging and platforms
-- Versioned release binaries with checksums; reproducible release builds.
+- Versioned release binaries with checksums. *Delivered: a Linux x86-64 archive and its SHA-256
+  checksum with every release ([ADR 0018](adr/0018-continuous-versioning-and-automated-releases.md)).*
+  Still open: bit-for-bit reproducible release builds.
 - `cmake --install` support and a CMake package config so that `fit_core` can be consumed with
   `find_package`.
 - macOS and Windows builds added to CI when there is a committed user.

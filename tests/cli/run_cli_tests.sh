@@ -32,7 +32,7 @@ expect_err() { grep -Eq -- "$1" "$ERR" || fail "stderr lacks /$1/: $(head -c 300
 expect_no_out() { [ ! -s "$OUT" ] || fail "stdout should be empty: $(head -c 200 "$OUT")"; }
 
 # ---- top level ----------------------------------------------------------------------------
-expect_exit 0 --version;                 expect_out '^fit [0-9]+\.[0-9]+\.[0-9]+$'
+expect_exit 0 --version;                 expect_out "^fit $(cat VERSION)\$"   # the single source
 expect_exit 0 --help;                    expect_out 'portfolio scenario'
 expect_exit 2;                           expect_out 'Usage: fit'
 expect_exit 0 bond --help;               expect_out 'bond forecast'

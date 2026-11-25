@@ -52,6 +52,25 @@ jobs:
       - name: Test
         run: ctest --preset ${{ matrix.preset }} --output-on-failure
 
+  versions:
+    name: Version and changelog
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          # Full history and tags: the version gate diffs against the base branch.
+          fetch-depth: 0
+
+      - name: Validate VERSION and CHANGELOG.md
+        run: python3 tools/release.py validate
+
+      - name: Require a version bump when shipped files change
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: python3 tools/release.py check-versions --base "origin/${BASE_REF}"
+
   format:
     name: clang-format
     runs-on: ubuntu-24.04
