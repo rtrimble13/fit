@@ -47,7 +47,7 @@ shift  clean_end  yield_end_pct  coupon_income    roll  curve_shift  reinvestmen
 
 | Area | Capabilities |
 |------|--------------|
-| **Yield curves** | Bootstrap a zero curve from deposits, OIS and term-rate swaps, par bond yields and zero rates. Multi-curve: bootstrap a term-rate projection curve on an OIS discount curve. Five interpolation schemes (`flat-forward`, `linear-zero`, `cubic-zero`, `monotone-cubic`, and Hagan-West `monotone-convex` for continuous, positive forwards). Flat-forward or flat-zero extrapolation beyond the last pillar. Exact repricing of every input, reported per instrument. Zero, par, forward and instantaneous forward rates at any tenor or date; forward strips; forward-implied future curves. |
+| **Yield curves** | Bootstrap a zero curve from deposits, FRAs, 3M IMM futures (SOFR futures, with convexity adjustments), OIS and term-rate swaps, par bond yields and zero rates. Multi-curve: bootstrap a term-rate projection curve on an OIS discount curve. Five interpolation schemes (`flat-forward`, `linear-zero`, `cubic-zero`, `monotone-cubic`, and Hagan-West `monotone-convex` for continuous, positive forwards). Flat-forward or flat-zero extrapolation beyond the last pillar. Exact repricing of every input, reported per instrument. Zero, par, forward and instantaneous forward rates at any tenor or date; forward strips; forward-implied future curves. |
 | **Bond valuation** | Price from yield, yield from price, price off a curve with a z-spread, implied z-spread from a price. Accrued interest, clean and dirty prices, cashflow schedules with discount factors. Six day-count conventions, short first coupons, month-end rolls, business-day adjusted payments. |
 | **Risk** | Macaulay and modified duration, convexity, DV01. Effective duration and convexity and key-rate DV01s by bump-and-reprice on a user-defined tenor ladder. |
 | **Forecasting** | Horizon analysis: projected price and total return to any horizon under an unchanged curve or realised forwards, with parallel shocks and curve twists. Return attribution into coupon income, roll-down, curve move and reinvestment. |
@@ -258,9 +258,10 @@ par,10Y,4.25
 
 | Column | Required | Meaning |
 |--------|----------|---------|
-| `type` | yes | `deposit`, `swap` (OIS), `irs` (fixed vs term rate), `par` or `zero` |
-| `tenor` | yes | tenor (`3M`, `10Y`) or maturity date |
-| `rate` | yes | quote in percent |
+| `type` | yes | `deposit`, `swap` (OIS), `irs` (fixed vs term rate), `fra`, `future`, `par` or `zero` |
+| `tenor` | yes | tenor (`3M`, `10Y`) or maturity date; for a `fra` its months (`3x6`); for a `future` its IMM code (`Z6`, `Z26`) |
+| `rate` | yes, except futures | quote in percent |
+| `price`, `convexity_bp` | `future` only | the futures price per 100, and the futures-minus-forward convexity adjustment in bp (default 0) |
 | `daycount`, `frequency`, `settle_days` | no | override the quote type's conventions (fixed leg for swaps) |
 | `float_frequency` | no | `irs` only: floating periods a year (default 4, a 3M rate) |
 
@@ -381,7 +382,7 @@ fit is pre-1.0. The main things it does not do, each scheduled in the
 - **Instruments:** fixed-rate bullet and zero-coupon bonds only. No floaters, callables,
   amortisers, inflation-linked bonds or bills on a discount basis.
 - **Curves:** a projection curve is built on a given discount curve, not jointly with it;
-  no futures, FRAs or basis swaps, no parametric fits. Extrapolation beyond the last pillar is flat (forward or
+  no basis swaps or payment lags, no futures convexity model, no parametric fits. Extrapolation beyond the last pillar is flat (forward or
   zero rate), with no ultimate forward rate.
 - **Yields and spreads:** street-convention yield and z-spread only; no G-spread, asset-swap
   spread or OAS.

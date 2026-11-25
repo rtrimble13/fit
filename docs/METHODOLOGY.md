@@ -176,12 +176,22 @@ start date: the as-of date advanced by the spot lag (`--spot-lag`, or the row's
 | `deposit` | `(DF(S)/DF(E') - 1) / tau(S, E')`, `E'` = `E` adjusted modified-following | `E'` |
 | `swap` | `(DF(S) - DF(P_n)) / sum_i tau_i DF(P_i)` over the fixed schedule. Each period accrues from the previous adjusted date (`S` for the first) to its own end adjusted modified-following, `P_i`, and is paid on `P_i`, as in ISDA swaps | last payment |
 | `irs` | the same formula on one curve. On a projection curve, see below | last payment |
+| `fra` `AxB` | `(DF(F_s)/DF(F_e) - 1) / tau(F_s, F_e)`: the simple forward from `F_s` = `S` + A months to `F_e` = `F_s` + (B - A) months, each adjusted modified-following (QuantLib's `FraRateHelper` dates) | `F_e` |
+| `future` | futures rate `(100 - price) / 100` = forward + convexity adjustment, the forward being the simple rate from the contract month's IMM date (third Wednesday) to the IMM date three months later, unadjusted | the later IMM date |
 | `par` | same formula over the coupon schedule, payments adjusted following; equivalent to a bond with that coupon pricing at 100 on `S` | last payment |
 | `zero` | `z(E)`; no spot lag | `E` |
 
-Defaults: `deposit` ACT/360; `swap` annual, ACT/360; `irs` annual ACT/360 fixed against
-quarterly floating periods (`float_frequency`, a 3M term rate); `par` semi-annual, ACT/ACT
-ICMA.
+Defaults: `deposit`, `fra` and `future` ACT/360; `swap` annual, ACT/360; `irs` annual ACT/360
+fixed against quarterly floating periods (`float_frequency`, a 3M term rate); `par`
+semi-annual, ACT/ACT ICMA.
+
+**Futures.** A `future` is a quarterly IMM contract, named by a code such as `Z6` or `Z26` (H
+March, M June, U September, Z December). A one-digit year is the first year from the as-of
+year on that ends in it. It is quoted by `price`, and its `convexity_bp` is the futures rate
+minus the forward rate, in bp, supplied by the user; there is no convexity model. For a
+compounded-overnight future such as 3M SOFR, compounding over the period telescopes on the
+curve to the same simple forward, so one formula serves term-rate and overnight futures. A
+contract whose period has started needs past fixings and is rejected.
 Schedules are generated as in section 2 with `S` as the dated date. The `swap` formula is the
 single-curve result: the floating leg is worth `DF(S) - DF(P_n)`.
 
@@ -206,6 +216,7 @@ on `P` and every leg is discounted on `D`:
 | `deposit` | `(P(S)/P(E') - 1) / tau(S, E')`: a term-rate fixing |
 | `swap` | `sum_j D(P_j) (P(P_(j-1))/P(P_j) - 1) / sum_i tau_i D(P_i)` over the fixed schedule (overnight compounding telescopes within each period on `P`) |
 | `irs` | the same, with the floating sum over the floating schedule (`float_frequency` periods a year, adjusted modified-following) |
+| `fra`, `future` | as on one curve: the simple forward of `P` over the period (plus the convexity adjustment for a future) |
 | `zero` | `z_P(E)` |
 | `par` | not allowed |
 
@@ -375,6 +386,8 @@ Expected values in the test suite come from sources independent of this code bas
 | Bootstrapped discount factors (`flat-forward`, `linear-zero`) at and between pillars | QuantLib `PiecewiseLogLinearDiscount`, `PiecewiseLinearZero` | `1e-9` |
 | Bootstrapped SOFR OIS discount factors (`swap` quotes, spot lag, US calendar) at and between pillars | QuantLib 1.44 `OISRateHelper` with default (modified-following, annual, ACT/360) conventions | `1e-10` |
 | Dual-curve projection curve (`deposit` and `irs` on the SOFR OIS curve; `flat-forward` and `linear-zero`) at and between pillars | QuantLib 1.44 `SwapRateHelper` with a 3M `IborIndex`, an exogenous discounting curve and par coupons; 3M forwards agree to `1e-11`% | `1e-10` |
+| SOFR curve from a 3M SOFR futures strip with convexity adjustments, and a 3M projection curve with FRAs (`flat-forward` and `linear-zero`) | QuantLib 1.44 `SofrFutureRateHelper`, `FraRateHelper` | `1e-10` (agreement 1.7e-12) |
+| IMM dates, FRA and futures dates, futures rate and convexity sign | hand calculation; QuantLib helpers' own start and end dates | exact |
 | Floating legs on a projection curve | hand calculation on flat curves | `1e-15` |
 | Curve price with z-spread | QuantLib `ZeroSpreadedTermStructure` | `1e-8` |
 | Natural cubic and monotone cubic interpolation | SciPy `CubicSpline(bc_type="natural")`, `PchipInterpolator` | `1e-11` |

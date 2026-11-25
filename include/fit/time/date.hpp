@@ -66,4 +66,8 @@ private:
     int serial_ = 0;
 };
 
+/// The third Wednesday of a month: the IMM date on which quarterly interest-rate futures
+/// reference periods start and end.
+Date third_wednesday(int year, int month);
+
 } // namespace fit

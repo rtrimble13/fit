@@ -80,8 +80,8 @@ roadmap item where noted.
 | Area | Limitation | Addressed in |
 |------|------------|--------------|
 | Curve construction | Projection curves are built in sequence on their discount curve, not jointly; no instruments that tie curves together (basis swaps) | M2 |
-| Curve construction | No futures, FRAs or basis swaps; no turn-of-year or meeting-date handling | M2 |
-| Curve construction | `swap` quotes assume an annual fixed leg and a single-curve floating leg | M2 |
+| Curve construction | No basis swaps; no turn-of-year or meeting-date handling; futures convexity adjustments are inputs, not modelled | M2 |
+| Curve construction | Swap legs have no payment lag, and floating coupons are par coupons (no indexed coupons or spreads) | M2 |
 | Curve construction | Exact bootstrap only; no smoothing or parametric fit | M2 |
 | Interpolation | The default, `flat-forward`, has forwards that are discontinuous at nodes, and `cubic-zero` can oscillate; `monotone-convex` avoids both but is not yet the default | M2 |
 | Extrapolation | Beyond the last pillar the zero rate or the last forward is held flat, selectable with `--extrapolation`; no ultimate-forward-rate method | Not scheduled |
@@ -126,7 +126,7 @@ The following are outside the intended scope of `fit` and are not planned:
 | Monotone convex interpolation | Hagan–West monotone convex scheme, with continuous positive forwards; candidate new default after validation (requires an ADR superseding the default in ADR 0007). *Scheme available as `monotone-convex` ([ADR 0014](adr/0014-monotone-convex-interpolation.md)); the default decision is outstanding.* |
 | Parametric fitting | Nelson–Siegel and Nelson–Siegel–Svensson least-squares fit to bond prices or yields, with fit diagnostics (per-instrument residuals, RMSE), as a complement to exact bootstrap |
 | Multi-curve construction | Separate discount (OIS) and projection curves; dual-curve bootstrap of term-rate swaps; curve sets addressable by name. *Delivered: dual-curve bootstrap and `irs` quotes ([ADR 0016](adr/0016-multi-curve-construction.md)), curve sets and `--curve-name` ([ADR 0017](adr/0017-curve-sets.md)).* |
-| Additional instruments for construction | Interest-rate futures with convexity adjustment, FRAs, swaps with explicit fixed/floating leg conventions, basis swaps |
+| Additional instruments for construction | Interest-rate futures with convexity adjustment, FRAs, swaps with explicit fixed/floating leg conventions, basis swaps. *Delivered: FRAs and quarterly IMM futures with an input convexity adjustment (0.3.0). Open: basis swaps, payment lags and further leg conventions, a convexity model.* |
 | Turn-of-year and jumps | Explicit jump pillars; step-function overlay for central-bank meeting dates |
 | Extrapolation choices | Flat forward and flat zero extrapolation, selectable and documented. *Delivered: `--extrapolation` ([ADR 0015](adr/0015-selectable-extrapolation.md)).* |
 | Calendars | TARGET, UK, Japan and joint calendars; data-driven holiday tables with effective dates; calendar validation against published schedules |

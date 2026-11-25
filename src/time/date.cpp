@@ -180,6 +180,13 @@ int Date::day() const {
     return civil_from_days(serial_).day;
 }
 
+Date third_wednesday(int year, int month) {
+    const Date first(year, month, 1);
+    const int to_wednesday =
+        (static_cast<int>(Weekday::Wednesday) - static_cast<int>(first.weekday()) + 7) % 7;
+    return first + to_wednesday + 14;
+}
+
 Weekday Date::weekday() const {
     // 1970-01-01 was a Thursday.
     const int w = ((serial_ % 7) + 7 + 3) % 7;

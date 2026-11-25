@@ -16,6 +16,27 @@ until the next release. See [docs/versioning-and-releases.md](docs/versioning-an
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-25
+
+Short-end instruments for curve construction: FRAs and quarterly IMM futures. Existing outputs
+are unchanged.
+
+### Added
+
+- `fra` quote type. `3x6` is the simple rate from 3 to 6 months after spot, using QuantLib
+  `FraRateHelper` dates: the start is spot plus A months, the end is that plus B - A months,
+  each modified following, ACT/360. FRAs work on single curves and on projection curves.
+- `future` quote type for quarterly IMM interest-rate futures such as 3M SOFR, named by code
+  (`Z6`, `Z26`). Each is quoted by its price in a new `price` column, with an optional
+  `convexity_bp` adjustment: futures rate = forward + adjustment. The period runs from the
+  contract month's third Wednesday to the one three months later. Contracts already in their
+  period are rejected. See [METHODOLOGY.md](docs/METHODOLOGY.md#4-bootstrapping).
+- Validated against QuantLib 1.44 `SofrFutureRateHelper` and `FraRateHelper` to 1.7e-12 under
+  flat-forward and linear-zero interpolation.
+- Examples `examples/data/usd_sofr_futures.csv` (SOFR with a futures strip) and
+  `examples/data/usd_term_sofr_3m_fra.csv` (a 3M projection curve with FRAs).
+- `fit::third_wednesday`, the IMM date of a month.
+
 ## [0.2.0] - 2026-11-25
 
 Curve depth: monotone convex interpolation, selectable extrapolation and multi-curve

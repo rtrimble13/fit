@@ -19,7 +19,8 @@ Beyond the last pillar, flat-forward extrapolation (ADR 0015) is compared for th
 and linear-zero curves, whose QuantLib counterparts hold the instantaneous forward there.
 
 The SOFR OIS curve is compared with OISRateHelper, and the 3M projection curve built on it with
-SwapRateHelper and an exogenous discounting curve (ADR 0016).
+SwapRateHelper and an exogenous discounting curve (ADR 0016). Futures and FRAs are compared with
+SofrFutureRateHelper and FraRateHelper.
 """
 import json
 import subprocess
@@ -154,5 +155,41 @@ for n in fit("curve","build",*dual)["nodes"]:
     if n["curve"]=="projection": cmp("projection df "+n["tenor"],n["discount"],proj.discount(D(n["pillar"])),1e-9)
 q=fit("curve","query",*dual,"--dates","2027-08-03,2030-01-15,2041-06-30,2050-02-02")["curve"]
 for n in q: cmp("projection interp df "+n["date"],n["discount"],proj.discount(D(n["date"])),1e-9)
+# Short-end instruments: a SOFR curve with a 3M SOFR futures strip (SofrFutureRateHelper, with
+# convexity adjustments) and a 3M projection curve with FRAs (FraRateHelper) on the OIS curve.
+print("futures and FRAs")
+imm={"H":ql.March,"M":ql.June,"U":ql.September,"Z":ql.December}
+fq=[("deposit","1W",4.33,0),("deposit","1M",4.31,0),("future","Z6",95.79,0.1),("future","H7",96.02,0.3),
+    ("future","M7",96.20,0.6),("future","U7",96.30,1.0),("future","Z7",96.33,1.4),("swap","2Y",3.74,0),
+    ("swap","3Y",3.68,0),("swap","5Y",3.71,0),("swap","7Y",3.80,0),("swap","10Y",3.93,0),("swap","15Y",4.08,0),
+    ("swap","20Y",4.12,0),("swap","30Y",4.02,0)]
+fh=[]
+for t,ten,r,ca in fq:
+    if t=="deposit":
+        fh.append(ql.DepositRateHelper(ql.QuoteHandle(ql.SimpleQuote(r/100)),ql.Period(ten),2,cal,ql.ModifiedFollowing,False,ql.Actual360()))
+    elif t=="future":
+        fh.append(ql.SofrFutureRateHelper(r,imm[ten[0]],2020+int(ten[1]),ql.Quarterly,ca/1e4))
+    else:
+        fh.append(ql.OISRateHelper(2,ql.Period(ten),ql.QuoteHandle(ql.SimpleQuote(r/100)),on))
+fut=ql.PiecewiseLogLinearDiscount(a,fh,ql.Actual365Fixed())
+for n in fit("curve","build","--curve","examples/data/usd_sofr_futures.csv","--asof",asof,"--spot-lag","2","--calendar","us")["nodes"]:
+    cmp("futures df "+n["tenor"],n["discount"],fut.discount(D(n["pillar"])),1e-9)
+rq=[("deposit","3M",4.29),("fra","3x6",3.97),("fra","6x9",3.78),("fra","9x12",3.70),("irs","2Y",3.81),("irs","3Y",3.76),
+    ("irs","5Y",3.79),("irs","7Y",3.88),("irs","10Y",4.01),("irs","15Y",4.16),("irs","20Y",4.20),("irs","30Y",4.10)]
+rh=[]
+for t,ten,r in rq:
+    rqh=ql.QuoteHandle(ql.SimpleQuote(r/100))
+    if t=="deposit":
+        rh.append(ql.DepositRateHelper(rqh,ql.Period(ten),2,cal,ql.ModifiedFollowing,False,ql.Actual360()))
+    elif t=="fra":
+        s_,e_=map(int,ten.split("x"))
+        rh.append(ql.FraRateHelper(rqh,s_,e_,2,cal,ql.ModifiedFollowing,False,ql.Actual360()))
+    else:
+        rh.append(ql.SwapRateHelper(rqh,ql.Period(ten),cal,ql.Annual,ql.ModifiedFollowing,ql.Actual360(),ibor,
+                                    ql.QuoteHandle(),ql.Period(0,ql.Days),dh,ql.nullInt(),ql.Pillar.LastRelevantDate,ql.Date(),False,False))
+fra=ql.PiecewiseLogLinearDiscount(a,rh,ql.Actual365Fixed())
+fradual=["--discount-curve","examples/data/usd_sofr.csv","--projection-curve","examples/data/usd_term_sofr_3m_fra.csv","--asof",asof,"--spot-lag","2","--calendar","us"]
+for n in fit("curve","build",*fradual)["nodes"]:
+    if n["curve"]=="projection": cmp("fra curve df "+n["tenor"],n["discount"],fra.discount(D(n["pillar"])),1e-9)
 print(f"{failures} failure(s)")
 sys.exit(1 if failures else 0)

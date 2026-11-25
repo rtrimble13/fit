@@ -16,6 +16,8 @@ enum class QuoteType {
     Deposit, ///< simply compounded cash deposit / bill yield, or a term-rate fixing
     Swap,    ///< par rate of a fixed vs compounded-overnight swap (OIS)
     Irs,     ///< par rate of a fixed vs term-rate swap (e.g. a 3M index paid quarterly)
+    Fra,     ///< forward-rate agreement "AxB": the simple rate from A to B months after spot
+    Future,  ///< quarterly IMM interest-rate future (e.g. 3M SOFR): 100 minus the price
     Par,     ///< par yield of a coupon bond priced at 100
     Zero     ///< continuously compounded ACT/365F zero rate
 };
@@ -27,13 +29,14 @@ std::string to_string(QuoteType type);
 struct Quote {
     QuoteType type = QuoteType::Zero;
     std::string label; ///< tenor or maturity as written in the input
-    double rate = 0.0; ///< decimal
-    Date start;        ///< accrual start (as-of date plus settlement lag)
+    double rate = 0.0; ///< decimal; for a future, the futures rate (100 - price) / 100
+    Date start;        ///< accrual start: spot, a FRA's start or a future's IMM date
     Date maturity;     ///< unadjusted maturity
     Date pillar;       ///< curve node date: last payment date of the instrument
     DayCount day_count = DayCount::Act365F;
     int frequency = 1;       ///< fixed-leg / coupon frequency (Swap, Irs and Par only)
     int float_frequency = 0; ///< floating-leg frequency: the term rate's tenor (Irs only)
+    double convexity = 0.0;  ///< futures rate minus forward rate, decimal (Future only)
 };
 
 /// Conventions applied when resolving quotes; per-row CSV columns override the defaults.
@@ -43,16 +46,19 @@ struct QuoteConventions {
     BusinessDayConvention convention = BusinessDayConvention::ModifiedFollowing;
 };
 
-/// Builds a quote from `tenor_or_date` ("5Y" or "2031-11-17"). `day_count`, `frequency` and
-/// `float_frequency` fall back to the market defaults for the quote type when empty / zero:
-/// deposit ACT/360; swap annual ACT/360; irs annual ACT/360 fixed vs quarterly floating; par
-/// semi-annual ACT/ACT ICMA; zero ACT/365F. `float_frequency` is valid for irs quotes only.
+/// Builds a quote from `tenor_or_date`: a tenor or date ("5Y", "2031-11-17"); for a FRA its
+/// "AxB" months ("3x6"); for a future its quarterly IMM code ("Z6" or "Z26": H, M, U or Z and
+/// the year). `day_count`, `frequency` and `float_frequency` fall back to the market defaults
+/// for the quote type when empty / zero: deposit, FRA and future ACT/360; swap annual ACT/360;
+/// irs annual ACT/360 fixed vs quarterly floating; par semi-annual ACT/ACT ICMA; zero ACT/365F.
+/// `float_frequency` is valid for irs quotes only, and `convexity` (decimal) for futures only.
 Quote make_quote(Date as_of, QuoteType type, const std::string& tenor_or_date, double rate,
                  const QuoteConventions& conventions, const std::string& day_count = "",
-                 int frequency = 0, int float_frequency = 0);
+                 int frequency = 0, int float_frequency = 0, double convexity = 0.0);
 
-/// Reads quotes from CSV with columns `type,tenor,rate` (rate in percent) and optional
-/// `daycount`, `frequency`, `float_frequency`, `settle_days`.
+/// Reads quotes from CSV with columns `type,tenor` and `rate` (in percent), or for futures
+/// `price` (per 100) with an optional `convexity_bp`; and optional `daycount`, `frequency`,
+/// `float_frequency`, `settle_days`.
 std::vector<Quote> load_quotes(const std::string& path, Date as_of,
                                const QuoteConventions& conventions);
 
