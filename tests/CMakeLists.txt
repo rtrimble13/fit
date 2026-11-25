@@ -15,6 +15,17 @@ target_compile_definitions(fit_unit_tests PRIVATE
 
 add_test(NAME unit COMMAND fit_unit_tests)
 
+# The release tool's tests (tools/release.py), including the check that VERSION and
+# CHANGELOG.md agree. Python is a development tool only, never a build dependency.
+find_package(Python3 3.10 COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND)
+  add_test(NAME release-tool
+    COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${PROJECT_SOURCE_DIR}/tools/tests
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+else()
+  message(STATUS "Python 3.10+ not found: the release-tool tests are skipped")
+endif()
+
 find_program(BASH_PROGRAM bash)
 if(BASH_PROGRAM)
   add_test(NAME cli

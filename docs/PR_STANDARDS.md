@@ -81,12 +81,13 @@ For user-visible changes, include a short before/after sample of the command and
 
 ## Required checks
 
-All of the following must pass before merge. The first four are enforced by CI; the rest are
+All of the following must pass before merge. The first five are enforced by CI; the rest are
 confirmed by the author and verified in review.
 
 | Check | Requirement |
 |-------|-------------|
 | Build | `dev` and `release` presets build on GCC and Clang with warnings as errors |
+| Version | `VERSION` is bumped, and `CHANGELOG.md` has its dated section, whenever a shipped file changes ([versioning and releases](versioning-and-releases.md)) |
 | Tests | `ctest` passes for both presets on both compilers; the `dev` preset runs under AddressSanitizer and UndefinedBehaviorSanitizer |
 | Formatting | `clang-format --dry-run --Werror` is clean over `include/`, `src/` and `tests/` |
 | Up to date | Branch is rebased on current `main` with no conflicts |
@@ -195,6 +196,9 @@ Reviewers confirm each of the following, or say why it does not apply.
 - [ ] README, methodology, walk-throughs and `--help` reflect the change; documented example
       output is real.
 - [ ] `CHANGELOG.md` is updated; an ADR is present if required.
+- [ ] If shipped files changed, the `VERSION` bump is the right size (MAJOR, MINOR or PATCH,
+      [versioning and releases](versioning-and-releases.md)); in particular, a numerical
+      change is not a PATCH.
 
 ## Review etiquette
 
@@ -238,7 +242,8 @@ A change is done when all of the following are true:
    recorded.
 5. User-facing documentation, `--help` text, walk-throughs and example data match the
    behaviour.
-6. `CHANGELOG.md` has an entry under `[Unreleased]`.
+6. If it changes a shipped file, `VERSION` is bumped and `CHANGELOG.md` has the new version's
+   section; otherwise any user-visible note is under `[Unreleased]`.
 7. An ADR exists for any methodology, dependency, layering or contract decision.
 8. No known defects, skipped tests or unexplained warnings remain; deliberately deferred work is
    captured in an issue and, where relevant, in `docs/ROADMAP.md`.

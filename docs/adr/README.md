@@ -26,6 +26,7 @@ ADRs are the authoritative explanation of *why* the code looks the way it does; 
 | [0015](0015-selectable-extrapolation.md) | Selectable extrapolation beyond the last pillar | Proposed |
 | [0016](0016-multi-curve-construction.md) | Multi-curve construction: projection curves on a discount curve | Proposed |
 | [0017](0017-curve-sets.md) | Curve sets addressable by name | Proposed |
+| [0018](0018-continuous-versioning-and-automated-releases.md) | Continuous versioning and automated releases | Proposed |
 
 ## When an ADR is required
 

@@ -48,6 +48,8 @@ CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake
 Makefile
+# ...but the root Makefile is the hand-written task runner, not CMake output.
+!/Makefile
 install_manifest.txt
 compile_commands.json
 
@@ -69,3 +71,7 @@ Testing/
 
 # CMake build trees
 build/
+
+# Release archives (tools/release.py package) and Python caches
+dist/
+__pycache__/

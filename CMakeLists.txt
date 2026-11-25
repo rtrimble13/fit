@@ -1,6 +1,14 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(fit VERSION 0.1.0 DESCRIPTION "Fixed income toolkit" LANGUAGES CXX)
+# The version lives in VERSION, its single source (docs/versioning-and-releases.md). CMake's
+# project() takes only the numeric part; FIT_VERSION keeps any pre-release suffix.
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" FIT_VERSION LIMIT_COUNT 1)
+if(NOT FIT_VERSION MATCHES "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$")
+  message(FATAL_ERROR "VERSION must hold MAJOR.MINOR.PATCH[-PRERELEASE]; got '${FIT_VERSION}'")
+endif()
+project(fit VERSION ${CMAKE_MATCH_1}.${CMAKE_MATCH_2}.${CMAKE_MATCH_3}
+        DESCRIPTION "Fixed income toolkit" LANGUAGES CXX)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS VERSION)
 
 option(FIT_BUILD_TESTS "Build the unit and CLI tests" ON)
 option(FIT_SANITIZE "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
@@ -43,6 +51,7 @@ add_library(fit_core STATIC
   src/io/table.cpp
 )
 target_include_directories(fit_core PUBLIC include)
+target_compile_definitions(fit_core PUBLIC FIT_VERSION_STRING="${FIT_VERSION}")
 target_link_libraries(fit_core PRIVATE fit_options)
 
 add_executable(fit

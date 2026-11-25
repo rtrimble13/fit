@@ -14,6 +14,18 @@
 - [ ] Documentation only
 - [ ] Build / CI / tooling
 
+## Version
+
+<!-- See docs/versioning-and-releases.md. A change to src/, include/, CMakeLists.txt,
+     CMakePresets.json or VERSION needs a bump; merging it publishes the release. -->
+
+- [ ] **No bump**: no shipped file changes.
+- [ ] **Bumped**: complete the table.
+
+| Old version | New version | Why this bump (MAJOR / MINOR / PATCH) |
+|-------------|-------------|---------------------------------------|
+|             |             |                                       |
+
 ## Numerical impact
 
 - [ ] **None** — no computed output changes for any existing input.
@@ -46,7 +58,8 @@
 - [ ] Conventions and units are explicit; no new magic numbers or inline tolerances.
 - [ ] Documentation updated (README, `docs/METHODOLOGY.md`, walk-throughs) where behaviour or
       usage changed.
-- [ ] `CHANGELOG.md` updated under `[Unreleased]`.
+- [ ] `make versions` passes: if shipped files changed, `VERSION` is bumped and `CHANGELOG.md`
+      has a dated section for it; otherwise any user-visible note is under `[Unreleased]`.
 - [ ] ADR added or superseded if this changes methodology, dependencies, layering or the CLI
       contract.
 - [ ] No new third-party dependency (or an accepted ADR covers it).

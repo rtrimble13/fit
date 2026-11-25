@@ -9,7 +9,18 @@ version is 0, minor releases may contain breaking changes; these are called out 
 Changes that alter a computed number for existing inputs are listed under **Numerical changes**
 with the reason and the size of the effect.
 
+Every change to what fit ships (`src/`, `include/`, the build files and `VERSION`) bumps the
+version in `VERSION` and adds a dated section here. Merging it to `main` publishes the release.
+Changes that ship nothing, such as documentation, tests and CI, may be noted under `[Unreleased]`
+until the next release. See [docs/versioning-and-releases.md](docs/versioning-and-releases.md).
+
 ## [Unreleased]
+
+## [0.2.0] - 2026-11-25
+
+Curve depth: monotone convex interpolation, selectable extrapolation and multi-curve
+construction, and a fix to swap accrual dates that changes SOFR-type curves slightly. Also the
+first version released by the automated release workflow.
 
 ### Added
 
@@ -45,6 +56,18 @@ with the reason and the size of the effect.
 - `irs` quote type: a fixed vs term-rate swap, by default annual ACT/360 fixed against
   quarterly floating periods. The new `float_frequency` column sets the floating periods.
 - Example projection curve `examples/data/usd_term_sofr_3m.csv`.
+
+- Automated releases. Merging a new `VERSION` to `main` tags `v<version>` and publishes a GitHub
+  release. The release carries a Linux x86-64 binary archive, its SHA-256 checksum and this
+  changelog's section as notes. See
+  [docs/versioning-and-releases.md](docs/versioning-and-releases.md) and
+  [ADR 0018](docs/adr/0018-continuous-versioning-and-automated-releases.md).
+
+### Changed
+
+- The version now lives in a `VERSION` file, read by CMake and reported by `fit --version`.
+  It used to be held in both `CMakeLists.txt` and `include/fit/version.hpp`. Pre-release
+  versions such as `0.3.0-rc.1` are supported.
 
 ### Fixed
 
@@ -110,6 +133,3 @@ Initial MVP release.
 - Continuous integration on GCC and Clang with a formatting check.
 - README, methodology document, walk-throughs with example data, architecture decision records,
   development roadmap, contributor guidelines and pull-request standards.
-
-[Unreleased]: https://github.com/rtrimble13/fit/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/rtrimble13/fit/releases/tag/v0.1.0
