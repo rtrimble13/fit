@@ -47,12 +47,14 @@ struct CurveSetDefaults {
     std::optional<Extrapolation> extrapolation;
     Calendar calendar;
     int settle_days = 0;
+    int payment_lag = 0;
 };
 
 /// Reads a curve-set CSV with columns `name,quotes` and optional `discount`, `reference`,
-/// `interp`, `extrapolation`, `calendar` and `spot_lag`, and loads each row's quotes file. Relative
-/// quotes paths are relative to the set file's directory. A row's `calendar` (none, weekends
-/// or us) replaces the default calendar, holidays included, for that curve.
+/// `interp`, `extrapolation`, `calendar`, `spot_lag` and `payment_lag`, and loads each row's
+/// quotes file. Relative quotes paths are relative to the set file's directory. A row's
+/// `calendar` (none, weekends or us) replaces the default calendar, holidays included, for that
+/// curve.
 std::vector<CurveSpec> load_curve_set(const std::string& path, Date as_of,
                                       const CurveSetDefaults& defaults);
 

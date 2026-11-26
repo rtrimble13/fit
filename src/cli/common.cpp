@@ -45,6 +45,9 @@ std::vector<OptionSpec> curve_options(bool required, bool select) {
         {"calendar", "NAME", "business-day calendar: none | weekends | us", "weekends", false},
         {"holidays", "FILE", "extra holidays, one ISO date per line", "", false},
         {"spot-lag", "DAYS", "business days from as-of to quote start dates", "0", false},
+        {"payment-lag", "DAYS",
+         "business days from each swap period's end to its payment (swap, irs and basis quotes)",
+         "0", false},
     };
     options.insert(options.end(), rest.begin(), rest.end());
     return options;
@@ -126,6 +129,8 @@ Market load_market(const Args& args, bool select) {
     defaults.calendar = m.calendar;
     defaults.settle_days = parse_int(args.require("spot-lag"), "--spot-lag");
     require(defaults.settle_days >= 0, "--spot-lag must be non-negative");
+    defaults.payment_lag = parse_int(args.require("payment-lag"), "--payment-lag");
+    require(defaults.payment_lag >= 0, "--payment-lag must be non-negative");
     defaults.method = parse_interpolation_method(args.require("interp"));
     if (const auto extrapolation = args.get("extrapolation")) {
         defaults.extrapolation = parse_extrapolation(*extrapolation);
@@ -135,6 +140,7 @@ Market load_market(const Args& args, bool select) {
         QuoteConventions conventions;
         conventions.calendar = defaults.calendar;
         conventions.settle_days = defaults.settle_days;
+        conventions.payment_lag = defaults.payment_lag;
         CurveSpec s;
         s.name = std::move(name);
         s.quotes = load_quotes(path, m.as_of, conventions);

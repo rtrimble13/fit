@@ -16,6 +16,24 @@ until the next release. See [docs/versioning-and-releases.md](docs/versioning-an
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-26
+
+Payment lags on swap legs. Existing outputs are unchanged.
+
+### Added
+
+- Payment lags for `swap`, `irs` and `basis` quotes: every leg pays a number of business days
+  after each period's adjusted end, as USD SOFR swaps do two days later. Accrual is unchanged,
+  coupons are discounted to the payment date, and the pillar moves to the last payment date. Set
+  it with `--payment-lag DAYS` on every command that builds a curve, a `payment_lag` column in
+  curve-set files, or a `payment_lag` column in quotes files, which overrides the others for
+  its row. The default is 0. Other quote types ignore the lag, and the quotes-file column is
+  rejected on them. See [METHODOLOGY.md](docs/METHODOLOGY.md#4-bootstrapping).
+- Validated against QuantLib 1.44 `OISRateHelper` and the basis-swap helpers with `paymentLag`
+  to 4.7e-13, and lagged `irs` quotes repriced by QuantLib's `FixedRateLeg` and `IborLeg`.
+- `payment_lag` arguments to `fit::swap_rate` and `fit::basis_spread`, and
+  `QuoteConventions::payment_lag` and `Quote::payment_lag`.
+
 ## [0.4.0] - 2026-11-25
 
 Basis swaps for curve construction: a curve can be built from another curve's index. Existing

@@ -107,7 +107,7 @@ std::vector<CurveSpec> load_curve_set(const std::string& path, Date as_of,
                                       const CurveSetDefaults& defaults) {
     const CsvTable csv = CsvTable::read(path);
     csv.require_columns_in({"name", "quotes", "discount", "reference", "interp", "extrapolation",
-                            "calendar", "spot_lag"});
+                            "calendar", "spot_lag", "payment_lag"});
     const std::filesystem::path base = std::filesystem::path(path).parent_path();
     std::vector<CurveSpec> specs;
     for (std::size_t i = 0; i < csv.size(); ++i) {
@@ -134,6 +134,11 @@ std::vector<CurveSpec> load_curve_set(const std::string& path, Date as_of,
             if (const auto lag = csv.get(i, "spot_lag")) {
                 conventions.settle_days = parse_int(*lag, "spot_lag");
                 require(conventions.settle_days >= 0, "spot_lag must be non-negative");
+            }
+            conventions.payment_lag = defaults.payment_lag;
+            if (const auto lag = csv.get(i, "payment_lag")) {
+                conventions.payment_lag = parse_int(*lag, "payment_lag");
+                require(conventions.payment_lag >= 0, "payment_lag must be non-negative");
             }
             std::filesystem::path quotes(csv.at(i, "quotes"));
             if (quotes.is_relative()) {

@@ -24,21 +24,27 @@ std::string no_reference(const Quote& quote) {
            "on a discount curve, the default reference, or name a reference curve in a curve set";
 }
 
+// A swap period's payment date: its adjusted end, or `payment_lag` business days after it.
+Date lagged(Date adjusted_end, const ScheduleSpec& spec, int payment_lag) {
+    return payment_lag == 0 ? adjusted_end : spec.calendar.advance(adjusted_end, payment_lag);
+}
+
 // Sum of accrual times DF(payment) over the periods of `spec`, each accruing from the previous
-// adjusted date (the start date for the first) to its own adjusted end, which is also its
-// payment date; and that last payment date.
+// adjusted date (the start date for the first) to its own adjusted end, and paid at that end
+// or `payment_lag` business days after it; and the last accrual end.
 struct Annuity {
     double value = 0.0;
     Date end;
 };
 
-Annuity adjusted_annuity(const YieldCurve& discount, const ScheduleSpec& spec, DayCount day_count) {
+Annuity adjusted_annuity(const YieldCurve& discount, const ScheduleSpec& spec, DayCount day_count,
+                         int payment_lag) {
     Annuity a;
     Date accrual_start = spec.start;
     for (const SchedulePeriod& p : make_schedule(spec)) {
         const double accrual = year_fraction(day_count, accrual_start, p.payment, p.ref_start,
                                              p.ref_end, spec.frequency);
-        a.value += accrual * discount.discount(p.payment);
+        a.value += accrual * discount.discount(lagged(p.payment, spec, payment_lag));
         accrual_start = p.payment;
     }
     a.end = accrual_start;
@@ -47,17 +53,21 @@ Annuity adjusted_annuity(const YieldCurve& discount, const ScheduleSpec& spec, D
 
 // The value on `discount` of a leg paying the forward of `projection` over each period of
 // `spec`, from adjusted date to adjusted date: par coupons, each DF(pay) * (P(start) / P(end) -
-// 1).
+// 1), paid at the period's adjusted end or `payment_lag` business days after it.
 double floating_leg(const YieldCurve& projection, const YieldCurve& discount,
-                    const ScheduleSpec& spec) {
+                    const ScheduleSpec& spec, int payment_lag) {
     double value = 0.0;
     Date accrual_start = spec.start;
     for (const SchedulePeriod& p : make_schedule(spec)) {
-        value += discount.discount(p.payment) *
+        value += discount.discount(lagged(p.payment, spec, payment_lag)) *
                  (projection.discount(accrual_start) / projection.discount(p.payment) - 1.0);
         accrual_start = p.payment;
     }
     return value;
+}
+
+bool pays_swap_legs(QuoteType type) {
+    return type == QuoteType::Swap || type == QuoteType::Irs || type == QuoteType::Basis;
 }
 
 // "AxB" for a FRA from A to B months after spot.
@@ -250,6 +260,13 @@ Quote make_quote(Date as_of, QuoteType type, const std::string& tenor_or_date, d
     if (type == QuoteType::Irs || type == QuoteType::Basis) {
         q.float_frequency = float_frequency != 0 ? float_frequency : kQuarterly;
     }
+    // Swap legs pay after a lag; the pillar is then the last payment date.
+    require(conventions.payment_lag >= 0,
+            "quote '" + tenor_or_date + "': the payment lag must be non-negative");
+    if (pays_swap_legs(type) && conventions.payment_lag > 0) {
+        q.payment_lag = conventions.payment_lag;
+        q.pillar = conventions.calendar.advance(q.pillar, q.payment_lag);
+    }
     require(convexity == 0.0 || type == QuoteType::Future,
             "quote '" + tenor_or_date + "': a convexity adjustment applies to futures only");
     q.convexity = convexity;
@@ -264,7 +281,8 @@ std::vector<Quote> load_quotes(const std::string& path, Date as_of,
                                const QuoteConventions& conventions) {
     const CsvTable csv = CsvTable::read(path);
     csv.require_columns_in({"type", "tenor", "rate", "price", "convexity_bp", "spread_bp",
-                            "daycount", "frequency", "float_frequency", "settle_days"});
+                            "daycount", "frequency", "float_frequency", "settle_days",
+                            "payment_lag"});
     std::vector<Quote> quotes;
     for (std::size_t i = 0; i < csv.size(); ++i) {
         try {
@@ -276,6 +294,11 @@ std::vector<Quote> load_quotes(const std::string& path, Date as_of,
             const auto frequency = csv.get(i, "frequency");
             const auto float_frequency = csv.get(i, "float_frequency");
             const QuoteType type = parse_quote_type(csv.at(i, "type"));
+            if (const auto lag = csv.get(i, "payment_lag")) {
+                require(pays_swap_legs(type),
+                        "the payment_lag column applies to swap, irs and basis quotes only");
+                row_conventions.payment_lag = parse_int(*lag, "payment_lag");
+            }
             // Futures are quoted by price, with an optional convexity adjustment in bp; basis
             // swaps by their spread in bp; every other quote by its rate in percent.
             const auto price = csv.get(i, "price");
@@ -340,43 +363,45 @@ double par_rate(const YieldCurve& curve, Date start, Date maturity, int frequenc
 }
 
 double swap_rate(const YieldCurve& curve, Date start, Date maturity, int frequency,
-                 DayCount day_count, const Calendar& calendar, BusinessDayConvention convention) {
+                 DayCount day_count, const Calendar& calendar, BusinessDayConvention convention,
+                 int payment_lag) {
     return swap_rate(curve, curve, start, maturity, frequency, day_count, frequency, calendar,
-                     convention);
+                     convention, payment_lag);
 }
 
 double swap_rate(const YieldCurve& projection, const YieldCurve& discount, Date start,
                  Date maturity, int fixed_frequency, DayCount fixed_day_count, int float_frequency,
-                 const Calendar& calendar, BusinessDayConvention convention) {
+                 const Calendar& calendar, BusinessDayConvention convention, int payment_lag) {
     ScheduleSpec spec;
     spec.start = start;
     spec.maturity = maturity;
     spec.frequency = fixed_frequency;
     spec.calendar = calendar;
     spec.convention = convention;
-    const Annuity fixed = adjusted_annuity(discount, spec, fixed_day_count);
-    if (&projection == &discount) {
-        // On one curve the floating coupons telescope to DF(start) - DF(end).
+    const Annuity fixed = adjusted_annuity(discount, spec, fixed_day_count, payment_lag);
+    if (&projection == &discount && payment_lag == 0) {
+        // On one curve, paid without a lag, the floating coupons telescope to DF(start) -
+        // DF(end).
         return (discount.discount(start) - discount.discount(fixed.end)) / fixed.value;
     }
     spec.frequency = float_frequency;
-    return floating_leg(projection, discount, spec) / fixed.value;
+    return floating_leg(projection, discount, spec, payment_lag) / fixed.value;
 }
 
 double basis_spread(const YieldCurve& projection, const YieldCurve& reference,
                     const YieldCurve& discount, Date start, Date maturity, int reference_frequency,
                     int projection_frequency, DayCount day_count, const Calendar& calendar,
-                    BusinessDayConvention convention) {
+                    BusinessDayConvention convention, int payment_lag) {
     ScheduleSpec spec;
     spec.start = start;
     spec.maturity = maturity;
     spec.frequency = reference_frequency;
     spec.calendar = calendar;
     spec.convention = convention;
-    const Annuity spread = adjusted_annuity(discount, spec, day_count);
-    const double reference_leg = floating_leg(reference, discount, spec);
+    const Annuity spread = adjusted_annuity(discount, spec, day_count, payment_lag);
+    const double reference_leg = floating_leg(reference, discount, spec, payment_lag);
     spec.frequency = projection_frequency;
-    return (floating_leg(projection, discount, spec) - reference_leg) / spread.value;
+    return (floating_leg(projection, discount, spec, payment_lag) - reference_leg) / spread.value;
 }
 
 double implied_quote_rate(const Quote& quote, const YieldCurve& curve, const Calendar& calendar) {
@@ -402,11 +427,11 @@ double implied_quote_rate(const Quote& quote, const YieldCurve& curve, const Yie
         // floating periods are the fixed periods.
         return swap_rate(curve, discount, quote.start, quote.maturity, quote.frequency,
                          quote.day_count, quote.frequency, calendar,
-                         BusinessDayConvention::ModifiedFollowing);
+                         BusinessDayConvention::ModifiedFollowing, quote.payment_lag);
     case QuoteType::Irs:
         return swap_rate(curve, discount, quote.start, quote.maturity, quote.frequency,
                          quote.day_count, quote.float_frequency, calendar,
-                         BusinessDayConvention::ModifiedFollowing);
+                         BusinessDayConvention::ModifiedFollowing, quote.payment_lag);
     case QuoteType::Basis: {
         // The reference leg pays the reference curve's index, by default the discount curve's.
         const YieldCurve* other =
@@ -414,7 +439,7 @@ double implied_quote_rate(const Quote& quote, const YieldCurve& curve, const Yie
         require(other != nullptr, no_reference(quote));
         return basis_spread(curve, *other, discount, quote.start, quote.maturity, quote.frequency,
                             quote.float_frequency, quote.day_count, calendar,
-                            BusinessDayConvention::ModifiedFollowing);
+                            BusinessDayConvention::ModifiedFollowing, quote.payment_lag);
     }
     case QuoteType::Par:
         require(&curve == &discount, "quote '" + quote.label +

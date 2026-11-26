@@ -197,6 +197,18 @@ contract whose period has started needs past fixings and is rejected.
 Schedules are generated as in section 2 with `S` as the dated date. The `swap` formula is the
 single-curve result: the floating leg is worth `DF(S) - DF(P_n)`.
 
+**Payment lags.** With a payment lag of `L` business days (`--payment-lag`, the curve set's
+`payment_lag`, or the row's `payment_lag`), every leg of a `swap`, `irs` or `basis` quote still
+accrues from `P_(i-1)` to `P_i`, but pays on `P_i + L` business days, `Q_i`. Each coupon is
+discounted at `DF(Q_i)`, and the pillar is the last payment date `Q_n`, as in QuantLib's
+`OISRateHelper` and basis-swap helpers. On one curve the floating coupons then no longer
+telescope, and the `swap` rate becomes
+
+`sum_i DF(Q_i) (DF(P_(i-1))/DF(P_i) - 1) / sum_i tau_i DF(Q_i)`.
+
+USD SOFR swaps, for example, pay two business days after each period ends. Deposits, FRAs,
+futures, par bonds and zero rates have no swap legs and ignore the lag. The default is no lag.
+
 **Algorithm.** Quotes are sorted by pillar date; two quotes with the same pillar are an
 error. The node zero rates start at the quoted rates. Then, repeatedly, for each pillar in
 order, the node's zero rate is solved by Brent's method so that its own instrument reprices
@@ -418,6 +430,9 @@ Expected values in the test suite come from sources independent of this code bas
 | IMM dates, FRA and futures dates, futures rate and convexity sign | hand calculation; QuantLib helpers' own start and end dates | exact |
 | 3M Term SOFR curve from SOFR basis swaps on the SOFR curve, and 6M Term SOFR from 3M / 6M basis swaps against the 3M curve (`flat-forward` and `linear-zero`) at and between pillars | QuantLib 1.44 `OvernightIborBasisSwapRateHelper`, `IborIborBasisSwapRateHelper` (spread on the base leg, par coupons) | `1e-10` (agreement 1.9e-12) |
 | Basis spread on flat curves, with different leg frequencies; a basis swap as the difference of two swaps | hand calculation; identity | `1e-15`, `1e-14` |
+| Payment lags: the SOFR curve and both basis curves with 2-day lags, at and between pillars, and their pillar dates | QuantLib 1.44 `OISRateHelper`, `OvernightIborBasisSwapRateHelper`, `IborIborBasisSwapRateHelper` with `paymentLag` 2 | `1e-10` (agreement 4.7e-13) |
+| Lagged `irs` quotes on a projection curve | each quote repriced by QuantLib `FixedRateLeg` and `IborLeg` with `paymentLag` 2 on fit's curves | `1e-12`; pillars exact |
+| A lagged swap on a flat curve | hand calculation | `1e-15` |
 | Floating legs on a projection curve | hand calculation on flat curves | `1e-15` |
 | Curve price with z-spread | QuantLib `ZeroSpreadedTermStructure` | `1e-8` |
 | Natural cubic and monotone cubic interpolation | SciPy `CubicSpline(bc_type="natural")`, `PchipInterpolator` | `1e-11` |

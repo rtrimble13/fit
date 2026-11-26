@@ -21,7 +21,8 @@ and linear-zero curves, whose QuantLib counterparts hold the instantaneous forwa
 The SOFR OIS curve is compared with OISRateHelper, and the 3M projection curve built on it with
 SwapRateHelper and an exogenous discounting curve (ADR 0016). Futures and FRAs are compared with
 SofrFutureRateHelper and FraRateHelper, and basis swaps with OvernightIborBasisSwapRateHelper
-and IborIborBasisSwapRateHelper.
+and IborIborBasisSwapRateHelper. Payment lags are compared with those helpers' paymentLag, and
+lagged irs quotes are repriced with QuantLib's FixedRateLeg and IborLeg on fit's curves.
 """
 import json
 import subprocess
@@ -246,5 +247,79 @@ for interp,cls in [("flat-forward",ql.PiecewiseLogLinearDiscount),("linear-zero"
         if n["curve"]=="term-sofr-6m": cmp(interp+" 3s6s basis df "+n["tenor"],n["discount"],c6.discount(D(n["pillar"])),1e-9)
     for n in fit("curve","query",*s6,"--curve-name","term-sofr-6m","--dates",dates)["curve"]:
         cmp(interp+" 3s6s basis interp df "+n["date"],n["discount"],c6.discount(D(n["date"])),1e-9)
+# Payment lags: every leg of a swap, irs or basis quote pays 2 business days after each period's
+# adjusted end, and the pillar is the last payment date. SOFR OIS and the basis curves are
+# bootstrapped with OISRateHelper and the basis helpers' paymentLag. QuantLib has no lagged
+# SwapRateHelper, so lagged irs quotes are repriced instead: fit's built curves are rebuilt in
+# QuantLib from their nodes (log-linear discount factors, which is flat-forward) and each swap is
+# priced with FixedRateLeg and IborLeg with paymentLag.
+print("payment lags")
+lag=2
+lh=[]
+for t,ten,r in sq:
+    if t=="deposit":
+        lh.append(ql.DepositRateHelper(ql.QuoteHandle(ql.SimpleQuote(r/100)),ql.Period(ten),2,cal,ql.ModifiedFollowing,False,ql.Actual360()))
+    else:
+        lh.append(ql.OISRateHelper(2,ql.Period(ten),ql.QuoteHandle(ql.SimpleQuote(r/100)),on,ql.YieldTermStructureHandle(),False,lag))
+lsofr=ql.PiecewiseLogLinearDiscount(a,lh,ql.Actual365Fixed())
+lagged=["--asof",asof,"--spot-lag","2","--calendar","us","--payment-lag",str(lag)]
+lnodes=fit("curve","build","--curve","examples/data/usd_sofr.csv",*lagged)["nodes"]
+for n in lnodes: cmp("lagged sofr df "+n["tenor"],n["discount"],lsofr.discount(D(n["pillar"])),1e-9)
+for n in fit("curve","query","--curve","examples/data/usd_sofr.csv",*lagged,"--dates",dates)["curve"]:
+    cmp("lagged sofr interp df "+n["date"],n["discount"],lsofr.discount(D(n["date"])),1e-9)
+lbh=ql.YieldTermStructureHandle(lsofr)
+lon=ql.OvernightIndex("SOFR-GB",0,ql.USDCurrency(),cal,ql.Actual360(),lbh)
+lb=[]
+for t,ten,r in bq:
+    if t=="deposit":
+        lb.append(ql.DepositRateHelper(ql.QuoteHandle(ql.SimpleQuote(r/100)),ql.Period(ten),2,cal,ql.ModifiedFollowing,False,ql.Actual360()))
+    else:
+        lb.append(ql.OvernightIborBasisSwapRateHelper(ql.QuoteHandle(ql.SimpleQuote(r/1e4)),ql.Period(ten),2,cal,ql.ModifiedFollowing,False,lon,i3,lbh,False,lag))
+lc3=ql.PiecewiseLogLinearDiscount(a,lb,ql.Actual365Fixed())
+lb3=["--discount-curve","examples/data/usd_sofr.csv","--projection-curve","examples/data/usd_term_sofr_3m_basis.csv",*lagged]
+for n in fit("curve","build",*lb3)["nodes"]:
+    if n["curve"]=="projection": cmp("lagged sofr basis df "+n["tenor"],n["discount"],lc3.discount(D(n["pillar"])),1e-9)
+# 6M from 3M / 6M basis swaps against that 3M basis curve, all lagged, through a curve set.
+import os, tempfile
+setfile=os.path.join(tempfile.mkdtemp(),"lagged_set.csv")
+with open(setfile,"w") as f:
+    root=os.path.abspath(DATA)
+    f.write(f"name,quotes,discount,reference,calendar,spot_lag,payment_lag\n"
+            f"sofr,{root}/usd_sofr.csv,,,us,2,{lag}\n"
+            f"basis-3m,{root}/usd_term_sofr_3m_basis.csv,sofr,,us,2,{lag}\n"
+            f"basis-6m,{root}/usd_term_sofr_6m.csv,sofr,basis-3m,us,2,{lag}\n")
+li3=ql.IborIndex("TSOFR3M",ql.Period("3M"),2,ql.USDCurrency(),cal,ql.ModifiedFollowing,False,ql.Actual360(),ql.YieldTermStructureHandle(lc3))
+l6=[]
+for t,ten,r in sq6:
+    if t=="deposit":
+        l6.append(ql.DepositRateHelper(ql.QuoteHandle(ql.SimpleQuote(r/100)),ql.Period(ten),2,cal,ql.ModifiedFollowing,False,ql.Actual360()))
+    else:
+        l6.append(ql.IborIborBasisSwapRateHelper(ql.QuoteHandle(ql.SimpleQuote(r/1e4)),ql.Period(ten),2,cal,ql.ModifiedFollowing,False,li3,i6,lbh,False,None,ql.DateGeneration.Backward,lag))
+lc6=ql.PiecewiseLogLinearDiscount(a,l6,ql.Actual365Fixed())
+for n in fit("curve","build","--curve-set",setfile,"--asof",asof)["nodes"]:
+    if n["curve"]=="basis-6m": cmp("lagged 3s6s basis df "+n["tenor"],n["discount"],lc6.discount(D(n["pillar"])),1e-9)
+os.remove(setfile)
+# Lagged irs: reprice each quote with QuantLib legs on fit's curves.
+def from_nodes(nodes):
+    return ql.DiscountCurve([a]+[D(n["pillar"]) for n in nodes],[1.0]+[n["discount"] for n in nodes],ql.Actual365Fixed())
+li=["--discount-curve","examples/data/usd_sofr.csv","--projection-curve","examples/data/usd_term_sofr_3m.csv",*lagged]
+built=fit("curve","build",*li)["nodes"]
+disc=from_nodes([n for n in built if n["curve"]=="discount"])
+proj_nodes=[n for n in built if n["curve"]=="projection"]
+projq=from_nodes(proj_nodes)
+pidx=ql.IborIndex("TSOFR3M",ql.Period("3M"),2,ql.USDCurrency(),cal,ql.ModifiedFollowing,False,ql.Actual360(),ql.YieldTermStructureHandle(projq))
+spot=cal.advance(a,2,ql.Days)
+for n in proj_nodes:
+    if n["type"]!="irs": continue
+    end=spot+ql.Period(n["tenor"])
+    fs=ql.Schedule(spot,end,ql.Period("1Y"),cal,ql.ModifiedFollowing,ql.ModifiedFollowing,ql.DateGeneration.Backward,False)
+    fl=ql.Schedule(spot,end,ql.Period("3M"),cal,ql.ModifiedFollowing,ql.ModifiedFollowing,ql.DateGeneration.Backward,False)
+    fixed=ql.FixedRateLeg(fs,ql.Actual360(),[1.0],[0.01],paymentAdjustment=ql.Following,paymentCalendar=cal,paymentLag=lag)
+    flt=ql.IborLeg([1.0],fl,pidx,ql.Actual360(),ql.Following,paymentCalendar=cal,paymentLag=lag,withIndexedCoupons=False)
+    sw=ql.Swap(fixed,flt); sw.setPricingEngine(ql.DiscountingSwapEngine(ql.YieldTermStructureHandle(disc)))
+    ok_pillar = str(max(c.date() for c in list(fixed)+list(flt)).ISO()) == n["pillar"]
+    failures += not ok_pillar
+    print(("OK " if ok_pillar else "BAD"), "lagged irs pillar", n["tenor"], n["pillar"])
+    cmp("lagged irs fair rate "+n["tenor"],n["quote_pct"]/100,abs(sw.legNPV(1)/sw.legNPV(0))*0.01,1e-12)
 print(f"{failures} failure(s)")
 sys.exit(1 if failures else 0)

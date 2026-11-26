@@ -171,6 +171,23 @@ expect_exit 1 curve build --curve "$BAD" "${SOFR[@]}"
 expect_err "quote '5Y': a basis swap prices against a reference curve, and this curve has none"
 rm -f "$BAD"
 
+# ---- payment lags: swap legs paid after their period ends ---------------------------------
+expect_exit 0 curve build --curve "$DATA/usd_sofr.csv" "${SOFR[@]}" --payment-lag 2
+expect_out '^1Y +swap +2027-11-23 '            # paid Tuesday, two business days after Friday 19th
+expect_out '^6M +deposit +2027-05-19 '         # deposits ignore the lag
+expect_out '^max_repricing_error_bp +0\.00000000$'
+expect_exit 0 curve build --help;          expect_out '--payment-lag DAYS'
+expect_exit 1 curve build --curve "$DATA/usd_sofr.csv" "${SOFR[@]}" --payment-lag -1
+expect_err '--payment-lag must be non-negative'
+BAD="$(mktemp)"
+printf 'type,tenor,rate,payment_lag\nswap,1Y,3.96,1\ndeposit,3M,4.2,2\n' >"$BAD"
+expect_exit 1 curve build --curve "$BAD" "${SOFR[@]}"
+expect_err ':3: the payment_lag column applies to swap, irs and basis quotes only'
+printf 'type,tenor,rate,payment_lag\nswap,1Y,3.96,1\n' >"$BAD"
+expect_exit 0 curve build --curve "$BAD" "${SOFR[@]}" --payment-lag 2
+expect_out '^1Y +swap +2027-11-22 '            # the row's lag of 1 overrides --payment-lag
+rm -f "$BAD"
+
 # ---- curve sets: any number of named curves -----------------------------------------------
 SET=(--curve-set "$DATA/usd_curves.csv" --asof 2026-11-17)
 expect_exit 0 curve build "${SET[@]}"

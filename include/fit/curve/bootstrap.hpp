@@ -42,12 +42,17 @@ struct Quote {
     /// Frequency of the leg that pays this curve's index, the term rate's tenor (Irs, Basis).
     int float_frequency = 0;
     double convexity = 0.0; ///< futures rate minus forward rate, decimal (Future only)
+    /// Business days from each leg period's adjusted end to its payment (Swap, Irs, Basis).
+    int payment_lag = 0;
 };
 
 /// Conventions applied when resolving quotes; per-row CSV columns override the defaults.
 struct QuoteConventions {
     Calendar calendar;
     int settle_days = 0; ///< business days from as-of to accrual start
+    /// Business days from each swap period's end to its payment; used by swap, irs and basis
+    /// quotes only.
+    int payment_lag = 0;
     BusinessDayConvention convention = BusinessDayConvention::ModifiedFollowing;
 };
 
@@ -57,14 +62,16 @@ struct QuoteConventions {
 /// for the quote type when empty / zero: deposit, FRA and future ACT/360; swap annual ACT/360;
 /// irs annual ACT/360 fixed vs quarterly floating; basis quarterly vs quarterly, ACT/360; par
 /// semi-annual ACT/ACT ICMA; zero ACT/365F. `float_frequency` is valid for irs and basis quotes
-/// only, and `convexity` (decimal) for futures only.
+/// only, and `convexity` (decimal) for futures only. Swap, irs and basis quotes take the
+/// conventions' payment lag; their pillar is then the last payment date, after the lag.
 Quote make_quote(Date as_of, QuoteType type, const std::string& tenor_or_date, double rate,
                  const QuoteConventions& conventions, const std::string& day_count = "",
                  int frequency = 0, int float_frequency = 0, double convexity = 0.0);
 
 /// Reads quotes from CSV with columns `type,tenor` and `rate` (in percent), or for futures
 /// `price` (per 100) with an optional `convexity_bp`, or for basis swaps `spread_bp`; and
-/// optional `daycount`, `frequency`, `float_frequency`, `settle_days`.
+/// optional `daycount`, `frequency`, `float_frequency`, `settle_days` and, for swap, irs and
+/// basis quotes, `payment_lag`.
 std::vector<Quote> load_quotes(const std::string& path, Date as_of,
                                const QuoteConventions& conventions);
 
@@ -89,32 +96,38 @@ double par_rate(const YieldCurve& curve, Date start, Date maturity, int frequenc
 /// Par fixed rate of a swap from `start` to `maturity` on `curve`, whose floating leg is worth
 /// DF(start) - DF(end) (an overnight-indexed swap on the same curve). Fixed periods accrue
 /// between business-day adjusted dates under `convention` and are paid at their adjusted end,
-/// as ISDA swaps do.
+/// as ISDA swaps do, or `payment_lag` business days after it. With a lag the floating coupons
+/// no longer telescope: each is worth DF(pay) * (DF(start) / DF(end) - 1).
 double swap_rate(const YieldCurve& curve, Date start, Date maturity, int frequency,
                  DayCount day_count, const Calendar& calendar,
-                 BusinessDayConvention convention = BusinessDayConvention::ModifiedFollowing);
+                 BusinessDayConvention convention = BusinessDayConvention::ModifiedFollowing,
+                 int payment_lag = 0);
 
 /// Par fixed rate of a swap whose floating leg pays the forward of `projection` over each
 /// floating period (`float_frequency` periods a year, on the same adjusted dates as the fixed
 /// leg), with both legs discounted on `discount`. Each floating coupon is worth
-/// DF(pay) * (P(start) / P(end) - 1), a par coupon. When `projection` and `discount` are the same
-/// curve this is the single-curve swap rate above.
+/// DF(pay) * (P(start) / P(end) - 1), a par coupon. Both legs pay `payment_lag` business days
+/// after each period's adjusted end. When `projection` and `discount` are the same curve this is
+/// the single-curve swap rate above.
 double swap_rate(const YieldCurve& projection, const YieldCurve& discount, Date start,
                  Date maturity, int fixed_frequency, DayCount fixed_day_count, int float_frequency,
                  const Calendar& calendar,
-                 BusinessDayConvention convention = BusinessDayConvention::ModifiedFollowing);
+                 BusinessDayConvention convention = BusinessDayConvention::ModifiedFollowing,
+                 int payment_lag = 0);
 
 /// The spread on the reference leg that makes a floating vs floating (basis) swap from `start` to
 /// `maturity` fair: one leg pays the forwards of `projection`, `projection_frequency` times a
 /// year; the other pays the forwards of `reference`, `reference_frequency` times a year, plus the
 /// spread accruing on `day_count`. Both legs discount on `discount`. Each leg's periods accrue
-/// between business-day adjusted dates under `convention` and are paid at their adjusted end,
-/// and each coupon is a par coupon, DF(pay) * (P(start) / P(end) - 1), as in `swap_rate`. A
-/// positive spread means the projection curve's index fixes above the reference's.
+/// between business-day adjusted dates under `convention` and are paid at their adjusted end, or
+/// `payment_lag` business days after it, and each coupon is a par coupon, DF(pay) * (P(start) /
+/// P(end) - 1), as in `swap_rate`. A positive spread means the projection curve's index fixes
+/// above the reference's.
 double basis_spread(const YieldCurve& projection, const YieldCurve& reference,
                     const YieldCurve& discount, Date start, Date maturity, int reference_frequency,
                     int projection_frequency, DayCount day_count, const Calendar& calendar,
-                    BusinessDayConvention convention = BusinessDayConvention::ModifiedFollowing);
+                    BusinessDayConvention convention = BusinessDayConvention::ModifiedFollowing,
+                    int payment_lag = 0);
 
 struct BootstrapOptions {
     InterpolationMethod method = InterpolationMethod::FlatForward;
