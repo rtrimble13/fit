@@ -1,0 +1,17 @@
+# Illustrative USD 3M Term SOFR projection curve as of 2026-11-17 (not real market data), built
+# from SOFR / 3M Term SOFR basis swaps instead of the fixed-rate swaps of usd_term_sofr_3m.csv.
+# The deposit is the 3M fixing. Each basis swap pays compounded SOFR plus spread_bp quarterly
+# against 3M Term SOFR quarterly, both ACT/360, discounted on the SOFR OIS curve. The reference
+# leg is the discount curve's index: build with
+#   --discount-curve usd_sofr.csv --projection-curve usd_term_sofr_3m_basis.csv --spot-lag 2 --calendar us
+type,tenor,rate,spread_bp
+deposit,3M,4.29,
+basis,1Y,,5.9
+basis,2Y,,6.9
+basis,3Y,,7.9
+basis,5Y,,7.9
+basis,7Y,,7.9
+basis,10Y,,7.9
+basis,15Y,,7.9
+basis,20Y,,7.9
+basis,30Y,,7.9

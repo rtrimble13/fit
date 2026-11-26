@@ -16,6 +16,37 @@ until the next release. See [docs/versioning-and-releases.md](docs/versioning-an
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-25
+
+Basis swaps for curve construction: a curve can be built from another curve's index. Existing
+outputs are unchanged.
+
+### Added
+
+- `basis` quote type for floating vs floating swaps, quoted by a spread in bp in a new
+  `spread_bp` column. The reference leg pays the reference curve's index plus the spread
+  (`frequency`, default quarterly). The other leg pays the index of the curve being built
+  (`float_frequency`, default quarterly). Both are discounted on the discount curve, with par
+  coupons on `irs` schedules. A positive spread means the built index fixes above the
+  reference. See [METHODOLOGY.md](docs/METHODOLOGY.md#4-bootstrapping) and
+  [ADR 0019](docs/adr/0019-basis-swaps-and-reference-curves.md).
+- The reference curve defaults to the discount curve, so `--discount-curve` with
+  `--projection-curve` prices basis swaps of the discount curve's index (e.g. SOFR) against the
+  projection curve's. Curve sets take a new optional `reference` column naming another curve,
+  and build each curve after its discount and reference curves.
+- Validated against QuantLib 1.44 `OvernightIborBasisSwapRateHelper` and
+  `IborIborBasisSwapRateHelper` to 1.9e-12 under flat-forward and linear-zero interpolation.
+- Examples `examples/data/usd_term_sofr_3m_basis.csv` (3M Term SOFR from SOFR basis swaps) and
+  `examples/data/usd_term_sofr_6m.csv` (6M Term SOFR from 3M vs 6M basis swaps). The example
+  set `examples/data/usd_curves.csv` gains the 6M curve, referencing the 3M curve.
+- `fit::basis_spread`, and `BootstrapOptions::reference`.
+
+### Changed
+
+- Error messages: a curve-set cycle now reads "depend on each other in a cycle (through their
+  discount or reference curves)", and `float_frequency` on the wrong quote type says it applies
+  to "irs and basis quotes only". The unknown-quote-type message lists `basis`.
+
 ## [0.3.0] - 2026-11-25
 
 Short-end instruments for curve construction: FRAs and quarterly IMM futures. Existing outputs

@@ -16,6 +16,49 @@ namespace {
 constexpr double kMinZero = -0.25;
 constexpr double kMaxZero = 2.0;
 constexpr int kMonthsPerFuture = 3; // quarterly IMM contracts: IMM date to the next one
+constexpr int kQuarterly = 4;       // the common 3M term rate's payment frequency
+
+std::string no_reference(const Quote& quote) {
+    return "quote '" + quote.label +
+           "': a basis swap prices against a reference curve, and this curve has none: build it "
+           "on a discount curve, the default reference, or name a reference curve in a curve set";
+}
+
+// Sum of accrual times DF(payment) over the periods of `spec`, each accruing from the previous
+// adjusted date (the start date for the first) to its own adjusted end, which is also its
+// payment date; and that last payment date.
+struct Annuity {
+    double value = 0.0;
+    Date end;
+};
+
+Annuity adjusted_annuity(const YieldCurve& discount, const ScheduleSpec& spec, DayCount day_count) {
+    Annuity a;
+    Date accrual_start = spec.start;
+    for (const SchedulePeriod& p : make_schedule(spec)) {
+        const double accrual = year_fraction(day_count, accrual_start, p.payment, p.ref_start,
+                                             p.ref_end, spec.frequency);
+        a.value += accrual * discount.discount(p.payment);
+        accrual_start = p.payment;
+    }
+    a.end = accrual_start;
+    return a;
+}
+
+// The value on `discount` of a leg paying the forward of `projection` over each period of
+// `spec`, from adjusted date to adjusted date: par coupons, each DF(pay) * (P(start) / P(end) -
+// 1).
+double floating_leg(const YieldCurve& projection, const YieldCurve& discount,
+                    const ScheduleSpec& spec) {
+    double value = 0.0;
+    Date accrual_start = spec.start;
+    for (const SchedulePeriod& p : make_schedule(spec)) {
+        value += discount.discount(p.payment) *
+                 (projection.discount(accrual_start) / projection.discount(p.payment) - 1.0);
+        accrual_start = p.payment;
+    }
+    return value;
+}
 
 // "AxB" for a FRA from A to B months after spot.
 std::pair<int, int> parse_fra(const std::string& text) {
@@ -93,6 +136,9 @@ QuoteType parse_quote_type(std::string_view text) {
     if (t == "irs") {
         return QuoteType::Irs;
     }
+    if (t == "basis") {
+        return QuoteType::Basis;
+    }
     if (t == "fra") {
         return QuoteType::Fra;
     }
@@ -106,7 +152,7 @@ QuoteType parse_quote_type(std::string_view text) {
         return QuoteType::Zero;
     }
     throw Error("unknown quote type '" + std::string(text) +
-                "' (expected deposit, swap, irs, fra, future, par or zero)");
+                "' (expected deposit, swap, irs, basis, fra, future, par or zero)");
 }
 
 std::string to_string(QuoteType type) {
@@ -121,6 +167,8 @@ std::string to_string(QuoteType type) {
         return "fra";
     case QuoteType::Future:
         return "future";
+    case QuoteType::Basis:
+        return "basis";
     case QuoteType::Par:
         return "par";
     case QuoteType::Zero:
@@ -175,6 +223,11 @@ Quote make_quote(Date as_of, QuoteType type, const std::string& tenor_or_date, d
         q.frequency = 1;
         q.pillar = q.maturity; // IMM dates are used as they are
         break;
+    case QuoteType::Basis:
+        q.day_count = DayCount::Act360;
+        q.frequency = kQuarterly; // the reference leg
+        q.pillar = conventions.calendar.adjust(q.maturity, conventions.convention);
+        break;
     case QuoteType::Par:
         q.day_count = DayCount::ActActICMA;
         q.frequency = 2;
@@ -192,10 +245,9 @@ Quote make_quote(Date as_of, QuoteType type, const std::string& tenor_or_date, d
     if (frequency != 0) {
         q.frequency = frequency;
     }
-    require(float_frequency == 0 || type == QuoteType::Irs,
-            "quote '" + tenor_or_date + "': float_frequency applies to irs quotes only");
-    if (type == QuoteType::Irs) {
-        constexpr int kQuarterly = 4; // the common 3M term-rate swap
+    require(float_frequency == 0 || type == QuoteType::Irs || type == QuoteType::Basis,
+            "quote '" + tenor_or_date + "': float_frequency applies to irs and basis quotes only");
+    if (type == QuoteType::Irs || type == QuoteType::Basis) {
         q.float_frequency = float_frequency != 0 ? float_frequency : kQuarterly;
     }
     require(convexity == 0.0 || type == QuoteType::Future,
@@ -211,8 +263,8 @@ Quote make_quote(Date as_of, QuoteType type, const std::string& tenor_or_date, d
 std::vector<Quote> load_quotes(const std::string& path, Date as_of,
                                const QuoteConventions& conventions) {
     const CsvTable csv = CsvTable::read(path);
-    csv.require_columns_in({"type", "tenor", "rate", "price", "convexity_bp", "daycount",
-                            "frequency", "float_frequency", "settle_days"});
+    csv.require_columns_in({"type", "tenor", "rate", "price", "convexity_bp", "spread_bp",
+                            "daycount", "frequency", "float_frequency", "settle_days"});
     std::vector<Quote> quotes;
     for (std::size_t i = 0; i < csv.size(); ++i) {
         try {
@@ -224,13 +276,24 @@ std::vector<Quote> load_quotes(const std::string& path, Date as_of,
             const auto frequency = csv.get(i, "frequency");
             const auto float_frequency = csv.get(i, "float_frequency");
             const QuoteType type = parse_quote_type(csv.at(i, "type"));
-            // Futures are quoted by price, with an optional convexity adjustment in bp; every
-            // other quote by its rate in percent.
+            // Futures are quoted by price, with an optional convexity adjustment in bp; basis
+            // swaps by their spread in bp; every other quote by its rate in percent.
             const auto price = csv.get(i, "price");
             const auto convexity_bp = csv.get(i, "convexity_bp");
+            const auto spread_bp = csv.get(i, "spread_bp");
+            require(!spread_bp || type == QuoteType::Basis,
+                    "the spread_bp column applies to basis quotes only");
             double rate = 0.0;
             double convexity = 0.0;
-            if (type == QuoteType::Future) {
+            if (type == QuoteType::Basis) {
+                if (!spread_bp || csv.get(i, "rate")) {
+                    throw Error("a basis swap is quoted by its spread (column spread_bp), not by "
+                                "a rate");
+                }
+                require(!price && !convexity_bp,
+                        "the price and convexity_bp columns apply to future quotes only");
+                rate = parse_double(*spread_bp, "spread_bp") / 1e4;
+            } else if (type == QuoteType::Future) {
                 if (!price || csv.get(i, "rate")) {
                     throw Error("a future is quoted by its price (column price), not by a rate");
                 }
@@ -291,29 +354,29 @@ double swap_rate(const YieldCurve& projection, const YieldCurve& discount, Date 
     spec.frequency = fixed_frequency;
     spec.calendar = calendar;
     spec.convention = convention;
-    // Each period accrues from the previous adjusted date (the start date for the first) to
-    // its own adjusted end, which is also its payment date.
-    double annuity = 0.0;
-    Date accrual_start = start;
-    for (const SchedulePeriod& p : make_schedule(spec)) {
-        const double accrual = year_fraction(fixed_day_count, accrual_start, p.payment, p.ref_start,
-                                             p.ref_end, fixed_frequency);
-        annuity += accrual * discount.discount(p.payment);
-        accrual_start = p.payment;
-    }
+    const Annuity fixed = adjusted_annuity(discount, spec, fixed_day_count);
     if (&projection == &discount) {
         // On one curve the floating coupons telescope to DF(start) - DF(end).
-        return (discount.discount(start) - discount.discount(accrual_start)) / annuity;
+        return (discount.discount(start) - discount.discount(fixed.end)) / fixed.value;
     }
     spec.frequency = float_frequency;
-    double floating = 0.0;
-    Date float_start = start;
-    for (const SchedulePeriod& p : make_schedule(spec)) {
-        floating += discount.discount(p.payment) *
-                    (projection.discount(float_start) / projection.discount(p.payment) - 1.0);
-        float_start = p.payment;
-    }
-    return floating / annuity;
+    return floating_leg(projection, discount, spec) / fixed.value;
+}
+
+double basis_spread(const YieldCurve& projection, const YieldCurve& reference,
+                    const YieldCurve& discount, Date start, Date maturity, int reference_frequency,
+                    int projection_frequency, DayCount day_count, const Calendar& calendar,
+                    BusinessDayConvention convention) {
+    ScheduleSpec spec;
+    spec.start = start;
+    spec.maturity = maturity;
+    spec.frequency = reference_frequency;
+    spec.calendar = calendar;
+    spec.convention = convention;
+    const Annuity spread = adjusted_annuity(discount, spec, day_count);
+    const double reference_leg = floating_leg(reference, discount, spec);
+    spec.frequency = projection_frequency;
+    return (floating_leg(projection, discount, spec) - reference_leg) / spread.value;
 }
 
 double implied_quote_rate(const Quote& quote, const YieldCurve& curve, const Calendar& calendar) {
@@ -321,7 +384,7 @@ double implied_quote_rate(const Quote& quote, const YieldCurve& curve, const Cal
 }
 
 double implied_quote_rate(const Quote& quote, const YieldCurve& curve, const YieldCurve& discount,
-                          const Calendar& calendar) {
+                          const Calendar& calendar, const YieldCurve* reference) {
     switch (quote.type) {
     case QuoteType::Deposit:
     case QuoteType::Fra:
@@ -344,6 +407,15 @@ double implied_quote_rate(const Quote& quote, const YieldCurve& curve, const Yie
         return swap_rate(curve, discount, quote.start, quote.maturity, quote.frequency,
                          quote.day_count, quote.float_frequency, calendar,
                          BusinessDayConvention::ModifiedFollowing);
+    case QuoteType::Basis: {
+        // The reference leg pays the reference curve's index, by default the discount curve's.
+        const YieldCurve* other =
+            reference != nullptr ? reference : (&discount != &curve ? &discount : nullptr);
+        require(other != nullptr, no_reference(quote));
+        return basis_spread(curve, *other, discount, quote.start, quote.maturity, quote.frequency,
+                            quote.float_frequency, quote.day_count, calendar,
+                            BusinessDayConvention::ModifiedFollowing);
+    }
     case QuoteType::Par:
         require(&curve == &discount, "quote '" + quote.label +
                                          "': a par bond quote prices on the curve itself, so it "
@@ -363,6 +435,14 @@ BootstrapResult bootstrap(Date as_of, std::vector<Quote> quotes, const Calendar&
             "bootstrap: the discount curve is as of " +
                 (options.discount ? options.discount->as_of().to_string() : std::string()) +
                 ", not " + as_of.to_string());
+    require(!options.reference || options.reference->as_of() == as_of,
+            "bootstrap: the reference curve is as of " +
+                (options.reference ? options.reference->as_of().to_string() : std::string()) +
+                ", not " + as_of.to_string());
+    // Basis quotes project their reference leg on the reference curve, by default the discount
+    // curve.
+    const YieldCurve* reference =
+        options.reference ? options.reference.get() : options.discount.get();
     std::stable_sort(quotes.begin(), quotes.end(),
                      [](const Quote& a, const Quote& b) { return a.pillar < b.pillar; });
     std::vector<double> times;
@@ -377,14 +457,18 @@ BootstrapResult bootstrap(Date as_of, std::vector<Quote> quotes, const Calendar&
         require(i == 0 || q.pillar > quotes[i - 1].pillar,
                 "quotes '" + (i > 0 ? quotes[i - 1].label : "") + "' and '" + q.label +
                     "' mature on the same date " + q.pillar.to_string());
+        require(q.type != QuoteType::Basis || reference != nullptr, no_reference(q));
         times.push_back((q.pillar - as_of) / 365.0);
-        zeros.push_back(q.rate); // the quote itself is a good first guess for the zero rate
+        // The quote itself is a good first guess for the zero rate; for a basis swap, the
+        // reference curve's zero rate plus the spread.
+        zeros.push_back(q.type == QuoteType::Basis ? reference->zero_rate(q.pillar) + q.rate
+                                                   : q.rate);
     }
 
     // Instruments discount on the given discount curve, or on the curve being built.
     const auto implied_rate = [&](const Quote& quote, const YieldCurve& curve) {
         return implied_quote_rate(quote, curve, options.discount ? *options.discount : curve,
-                                  calendar);
+                                  calendar, options.reference.get());
     };
     const auto max_error = [&](const YieldCurve& curve, std::vector<double>* implied) {
         double worst = 0.0;

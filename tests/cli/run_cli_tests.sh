@@ -147,6 +147,30 @@ expect_exit 1 curve build --curve "$BAD" "${SOFR[@]}"
 expect_err ":2: FRA '6x3': end month must follow the start month"
 rm -f "$BAD"
 
+# ---- basis swaps: a curve from another curve's index --------------------------------------
+# With the pair, basis quotes price against the discount curve's index (SOFR).
+BASIS=(--discount-curve "$DATA/usd_sofr.csv" --projection-curve "$DATA/usd_term_sofr_3m_basis.csv" "${SOFR[@]}")
+expect_exit 0 curve build "${BASIS[@]}"
+expect_out '^projection +10Y +basis +2036-11-19 +10\.0137 +0\.0790 .* 0\.000000$'  # quote_pct: 7.9bp
+expect_out '^projection +discount +flat-forward +flat-forward +us +10 +1 +0\.00000000$'
+expect_exit 0 curve query "${BASIS[@]}" --tenors 10Y --format csv
+expect_out '^10Y,2036-11-17,[^,]*,4\.01'      # close to the irs-built curve's 4.01
+# In a curve set, the reference column names the curve the other leg pays (3M against 6M).
+expect_exit 0 curve build --curve-set "$DATA/usd_curves.csv" --asof 2026-11-17
+expect_out '^term-sofr-6m +sofr +flat-forward +flat-forward +us +10 +1 +0\.00000000$'
+expect_out '^term-sofr-6m +5Y +basis +2031-11-19 +5\.0082 +0\.0530 '
+BAD="$(mktemp)"
+printf 'type,tenor,rate\nbasis,5Y,0.05\n' >"$BAD"
+expect_exit 1 curve build --discount-curve "$DATA/usd_sofr.csv" --projection-curve "$BAD" "${SOFR[@]}"
+expect_err ":2: a basis swap is quoted by its spread \(column spread_bp\), not by a rate"; expect_no_out
+printf 'type,tenor,rate,spread_bp\nirs,5Y,4.0,5\n' >"$BAD"
+expect_exit 1 curve build --discount-curve "$DATA/usd_sofr.csv" --projection-curve "$BAD" "${SOFR[@]}"
+expect_err ':2: the spread_bp column applies to basis quotes only'
+printf 'type,tenor,spread_bp\nbasis,5Y,5\n' >"$BAD"
+expect_exit 1 curve build --curve "$BAD" "${SOFR[@]}"
+expect_err "quote '5Y': a basis swap prices against a reference curve, and this curve has none"
+rm -f "$BAD"
+
 # ---- curve sets: any number of named curves -----------------------------------------------
 SET=(--curve-set "$DATA/usd_curves.csv" --asof 2026-11-17)
 expect_exit 0 curve build "${SET[@]}"
@@ -155,9 +179,9 @@ expect_out '^term-sofr-3m +sofr +flat-forward +flat-forward +us +10 '
 expect_out '^treasury +treasury +flat-forward +flat-forward +weekends +11 +1 '
 expect_out '^treasury +10Y +par +2036-11-17 +10\.0082 +4\.2500 +4\.2417 +0\.654084 '
 expect_exit 2 curve query "${SET[@]}"
-expect_err "--curve-name is required: the curve set has several curves \(sofr, term-sofr-3m, treasury\)"
+expect_err "--curve-name is required: the curve set has several curves \(sofr, term-sofr-3m, term-sofr-6m, treasury\)"
 expect_exit 1 curve query "${SET[@]}" --curve-name libor
-expect_err "unknown curve 'libor' \(curves: sofr, term-sofr-3m, treasury\)"; expect_no_out
+expect_err "unknown curve 'libor' \(curves: sofr, term-sofr-3m, term-sofr-6m, treasury\)"; expect_no_out
 expect_exit 0 curve forwards "${SET[@]}" --curve-name term-sofr-3m --tenor 1Y --end 2Y --format csv
 expect_out '^2026-11-17,2027-11-17,0,4\.024'      # as from the pair: the same projection curve
 # A bond on a projection curve of the set discounts on that curve's discount curve (sofr), and
@@ -175,10 +199,13 @@ expect_err "unknown option '--curve-name'"        # build reports every curve
 BAD="$(mktemp)"
 printf 'name,quotes,discount\na,%s/usd_sofr.csv,b\nb,%s/usd_sofr.csv,a\n' "$PWD/$DATA" "$PWD/$DATA" >"$BAD"
 expect_exit 1 curve build --curve-set "$BAD" --asof 2026-11-17
-expect_err 'curve set: curves a, b are discounted on each other in a cycle'
+expect_err 'curve set: curves a, b depend on each other in a cycle \(through their discount or reference curves\)'
 printf 'name,quotes,discount\na,%s/usd_sofr.csv,ois\n' "$PWD/$DATA" >"$BAD"
 expect_exit 1 curve build --curve-set "$BAD" --asof 2026-11-17
 expect_err "curve set: curve 'a' is discounted on unknown curve 'ois' \(curves: a\)"
+printf 'name,quotes,discount,reference\na,%s/usd_sofr.csv,,\nb,%s/usd_term_sofr_6m.csv,a,c\n' "$PWD/$DATA" "$PWD/$DATA" >"$BAD"
+expect_exit 1 curve build --curve-set "$BAD" --asof 2026-11-17
+expect_err "curve set: curve 'b' names unknown reference curve 'c' \(curves: a, b\)"
 printf 'name,quotes,discunt\na,%s/usd_sofr.csv,\n' "$PWD/$DATA" >"$BAD"
 expect_exit 1 curve build --curve-set "$BAD" --asof 2026-11-17
 expect_err 'discunt'

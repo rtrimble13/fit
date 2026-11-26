@@ -532,25 +532,31 @@ and the curve that discounts it, and may override the command line's conventions
 ```console
 $ cat examples/data/usd_curves.csv
 # Illustrative USD curve set as of 2026-11-17: each row names a curve, its quotes file (relative
-# to this file) and the curve that discounts it (empty: itself). Optional columns interp,
-# extrapolation, calendar and spot_lag override the command line for that curve.
-name,quotes,discount,calendar,spot_lag
-sofr,usd_sofr.csv,,us,2
-term-sofr-3m,usd_term_sofr_3m.csv,sofr,us,2
-treasury,usd_treasury.csv,,weekends,0
+# to this file) and the curve that discounts it (empty: itself). The reference column names the
+# curve whose index the other leg of a curve's basis swaps pays (empty: its discount curve).
+# Optional columns interp, extrapolation, calendar and spot_lag override the command line for
+# that curve.
+name,quotes,discount,reference,calendar,spot_lag
+sofr,usd_sofr.csv,,,us,2
+term-sofr-3m,usd_term_sofr_3m.csv,sofr,,us,2
+term-sofr-6m,usd_term_sofr_6m.csv,sofr,term-sofr-3m,us,2
+treasury,usd_treasury.csv,,,weekends,0
 ```
 
+The 6M curve and its `reference` column are explained under [Basis swaps](#basis-swaps) below.
+
 `fit curve build` builds and reports every curve. Each curve is built after the curve that
-discounts it, whatever the row order:
+discounts it, and after its reference curve, whatever the row order:
 
 ```console
-$ fit curve build --curve-set examples/data/usd_curves.csv --asof 2026-11-17 | head -12
+$ fit curve build --curve-set examples/data/usd_curves.csv --asof 2026-11-17 | head -13
 curves
 ======
 curve         discount_curve  interpolation  extrapolation  calendar  nodes  bootstrap_passes  max_repricing_error_bp
 ------------  --------------  -------------  -------------  --------  -----  ----------------  ----------------------
 sofr          sofr            flat-forward   flat-forward   us           13                 1              0.00000000
 term-sofr-3m  sofr            flat-forward   flat-forward   us           10                 1              0.00000000
+term-sofr-6m  sofr            flat-forward   flat-forward   us           10                 1              0.00000000
 treasury      treasury        flat-forward   flat-forward   weekends     11                 1              0.00000000
 
 market
@@ -575,6 +581,116 @@ clean_price,99.9846191584
 ```
 
 The file format and selection rules are in [ADR 0017](../adr/0017-curve-sets.md).
+
+### Basis swaps
+
+A basis swap exchanges two floating rates, one of them plus a quoted spread. It builds one
+curve from another: desks quote 3M Term SOFR against SOFR, and 6M against 3M, more readily than
+fixed-rate swaps on every tenor. In a `basis` quote the spread (`spread_bp`) is paid on the
+*reference* leg, so "6M = 3M + 5bp" is a positive spread. Both legs are discounted on the
+discount curve.
+
+`usd_term_sofr_3m_basis.csv` builds the 3M curve from SOFR vs 3M Term SOFR basis swaps instead
+of the fixed-rate swaps of `usd_term_sofr_3m.csv`. With the pair, the reference leg pays the
+discount curve's index, compounded SOFR, quarterly:
+
+```console
+$ fit curve build --discount-curve examples/data/usd_sofr.csv --projection-curve examples/data/usd_term_sofr_3m_basis.csv --asof 2026-11-17 --spot-lag 2 --calendar us --format csv | grep -E "^(curve,tenor,|projection,[0-9])" | cut -d, -f2,3,4,6,8
+tenor,type,pillar,quote_pct,discount
+3M,deposit,2027-02-19,4.29,0.988921119873
+1Y,basis,2027-11-19,0.059,0.960596843807
+2Y,basis,2028-11-20,0.069,0.926638166611
+3Y,basis,2029-11-19,0.079,0.893607451584
+5Y,basis,2031-11-19,0.079,0.827877412338
+7Y,basis,2033-11-21,0.079,0.762295250384
+10Y,basis,2036-11-19,0.079,0.669125944294
+15Y,basis,2041-11-19,0.079,0.533311898143
+20Y,basis,2046-11-19,0.079,0.428941860422
+30Y,basis,2056-11-20,0.079,0.29594341065
+```
+
+`quote_pct` shows the spread in percent: 0.079 is 7.9bp. The spreads are the irs-built curve's
+own basis to SOFR, rounded to 0.1bp, so the two 3M curves agree to a fraction of a basis point:
+
+```console
+$ for c in usd_term_sofr_3m usd_term_sofr_3m_basis; do echo "--- $c"; fit curve query --discount-curve examples/data/usd_sofr.csv --projection-curve examples/data/$c.csv --asof 2026-11-17 --spot-lag 2 --calendar us --tenors 2Y,10Y,30Y --format csv | cut -d, -f1,4; done
+--- usd_term_sofr_3m
+tenor,zero_cc_pct
+2Y,3.7897471809
+10Y,4.01197445723
+30Y,4.05445631024
+--- usd_term_sofr_3m_basis
+tenor,zero_cc_pct
+2Y,3.78970398919
+10Y,4.01214892256
+30Y,4.05464536785
+```
+
+The 6M curve of the example set is built from its 6M fixing and 3M vs 6M basis swaps. The 3M leg
+pays quarterly with the spread; the 6M leg pays semi-annually (`float_frequency` 2):
+
+```console
+$ cat examples/data/usd_term_sofr_6m.csv
+# Illustrative USD 6M Term SOFR projection curve as of 2026-11-17 (not real market data). The
+# deposit is the 6M fixing. Each basis swap pays 3M Term SOFR plus spread_bp quarterly against
+# 6M Term SOFR semi-annually (float_frequency 2), both ACT/360, discounted on SOFR. The 3M leg
+# projects on the curve named in the reference column of usd_curves.csv (term-sofr-3m).
+type,tenor,rate,spread_bp,float_frequency
+deposit,6M,4.14,,
+basis,1Y,,4.6,2
+basis,2Y,,4.9,2
+basis,3Y,,5.1,2
+basis,5Y,,5.3,2
+basis,7Y,,5.4,2
+basis,10Y,,5.5,2
+basis,15Y,,5.5,2
+basis,20Y,,5.4,2
+basis,30Y,,5.2,2
+```
+
+The set's `reference` column makes `term-sofr-3m` the reference curve, so the 3M leg projects
+on the 3M curve rather than on SOFR, the discount curve. The 6M curve is then built after both:
+
+```console
+$ fit curve build --curve-set examples/data/usd_curves.csv --asof 2026-11-17 --format csv | grep -E "^(curve,tenor,|term-sofr-6m,[0-9])" | cut -d, -f2,3,4,6,8
+tenor,type,pillar,quote_pct,discount
+6M,deposit,2027-05-19,4.14,0.979386457807
+1Y,basis,2027-11-19,0.046,0.960163909537
+2Y,basis,2028-11-20,0.049,0.925739420739
+3Y,basis,2029-11-19,0.051,0.892256205163
+5Y,basis,2031-11-19,0.053,0.825704366494
+7Y,basis,2033-11-21,0.054,0.759437910071
+10Y,basis,2036-11-19,0.055,0.665479891808
+15Y,basis,2041-11-19,0.055,0.528974061782
+20Y,basis,2046-11-19,0.054,0.424422165271
+30Y,basis,2056-11-20,0.052,0.291537980275
+```
+
+Its 6M forwards sit about 5bp above the 3M curve's 6M forwards, the basis the swaps quote:
+
+```console
+$ for c in term-sofr-3m term-sofr-6m; do echo "--- $c"; fit curve forwards --curve-set examples/data/usd_curves.csv --asof 2026-11-17 --curve-name $c --tenor 6M --end 3Y --format csv | cut -d, -f1,4; done
+--- term-sofr-3m
+start,fwd_simple_pct
+2026-11-17,4.09953366453
+2027-05-17,3.870036776
+2027-11-17,3.56552043392
+2028-05-17,3.56249448282
+2028-11-17,3.62101839373
+2029-05-17,3.62255714768
+--- term-sofr-6m
+start,fwd_simple_pct
+2026-11-17,4.14
+2027-05-17,3.91940073403
+2027-11-17,3.61742329847
+2028-05-17,3.61446285702
+2028-11-17,3.67599440751
+2029-05-17,3.677600713
+```
+
+The leg formulas are in [METHODOLOGY.md](../METHODOLOGY.md#4-bootstrapping), and the design,
+including why the spread is always on the reference leg, in
+[ADR 0019](../adr/0019-basis-swaps-and-reference-curves.md).
 
 ## 9. Machine-readable output
 
@@ -616,7 +732,7 @@ errors exit with code 1 and command-line mistakes with code 2, so scripts can te
 
 ```console
 $ printf 'type,tenor,rate\npar,2Y,3.90\ncap,5Y,4.00\n' > /tmp/bad.csv; fit curve build --curve /tmp/bad.csv --asof 2026-11-17
-fit: error: /tmp/bad.csv:3: unknown quote type 'cap' (expected deposit, swap, irs, fra, future, par or zero)
+fit: error: /tmp/bad.csv:3: unknown quote type 'cap' (expected deposit, swap, irs, basis, fra, future, par or zero)
 ```
 
 (exit code 1)

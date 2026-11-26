@@ -176,14 +176,16 @@ start date: the as-of date advanced by the spot lag (`--spot-lag`, or the row's
 | `deposit` | `(DF(S)/DF(E') - 1) / tau(S, E')`, `E'` = `E` adjusted modified-following | `E'` |
 | `swap` | `(DF(S) - DF(P_n)) / sum_i tau_i DF(P_i)` over the fixed schedule. Each period accrues from the previous adjusted date (`S` for the first) to its own end adjusted modified-following, `P_i`, and is paid on `P_i`, as in ISDA swaps | last payment |
 | `irs` | the same formula on one curve. On a projection curve, see below | last payment |
+| `basis` | the spread on the reference leg that makes a floating vs floating swap fair; see "Basis swaps" below | `E'` |
 | `fra` `AxB` | `(DF(F_s)/DF(F_e) - 1) / tau(F_s, F_e)`: the simple forward from `F_s` = `S` + A months to `F_e` = `F_s` + (B - A) months, each adjusted modified-following (QuantLib's `FraRateHelper` dates) | `F_e` |
 | `future` | futures rate `(100 - price) / 100` = forward + convexity adjustment, the forward being the simple rate from the contract month's IMM date (third Wednesday) to the IMM date three months later, unadjusted | the later IMM date |
 | `par` | same formula over the coupon schedule, payments adjusted following; equivalent to a bond with that coupon pricing at 100 on `S` | last payment |
 | `zero` | `z(E)`; no spot lag | `E` |
 
 Defaults: `deposit`, `fra` and `future` ACT/360; `swap` annual, ACT/360; `irs` annual ACT/360
-fixed against quarterly floating periods (`float_frequency`, a 3M term rate); `par`
-semi-annual, ACT/ACT ICMA.
+fixed against quarterly floating periods (`float_frequency`, a 3M term rate); `basis`
+quarterly reference leg (`frequency`) against a quarterly leg on this curve's index
+(`float_frequency`), the spread accruing ACT/360; `par` semi-annual, ACT/ACT ICMA.
 
 **Futures.** A `future` is a quarterly IMM contract, named by a code such as `Z6` or `Z26` (H
 March, M June, U September, Z December). A one-digit year is the first year from the as-of
@@ -224,9 +226,35 @@ Floating coupons are par coupons: each pays the forward of `P` over its own accr
 the floating day count cancels. When `P` and `D` are the same curve the floating legs telescope
 to `D(S) - D(P_n)` and the single-curve formulas above result.
 
+**Basis swaps** ([ADR 0019](adr/0019-basis-swaps-and-reference-curves.md)). A `basis` quote is
+a floating vs floating swap from `S` to `E` with the spread `s` (`spread_bp`) paid on one leg.
+That leg, the reference leg, pays the index of an already built reference curve `R`,
+`frequency` times a year, plus `s`. The other leg pays the index of the curve being built, `P`,
+`float_frequency` times a year. Both legs are discounted on `D`. Each leg's periods run between
+dates adjusted modified-following, from `S`, and each is paid at its adjusted end, as for
+`irs`. The model-implied spread is
+
+`s = [ sum_j D(Q_j) (P(Q_(j-1))/P(Q_j) - 1) - sum_i D(P_i) (R(P_(i-1))/R(P_i) - 1) ] / sum_i tau_i D(P_i)`
+
+over the reference leg's dates `P_i` and this curve's leg's dates `Q_j`, with `tau` on the
+quote's day count (default ACT/360). A positive spread means this curve's index fixes above the
+reference's, so a 6M curve quoted at 3M + 5bp sits above the 3M curve. On a projection curve
+the reference defaults to the discount curve: for `--discount-curve sofr --projection-curve
+term`, a basis quote prices compounded SOFR + spread against the term rate. Compounding
+overnight over a period telescopes on `R` to the same par coupon, so one formula serves
+overnight and term-rate reference legs. A curve set can name another reference curve in its
+`reference` column, such as the 3M curve for a 6M curve. A curve with neither a discount curve
+nor a reference curve cannot take basis quotes. The reference curve, like the discount curve,
+is used as built: past its last pillar it extrapolates under its own rule.
+
+These are the conventions of QuantLib's `OvernightIborBasisSwapRateHelper` and
+`IborIborBasisSwapRateHelper` with the spread on the base leg and par coupons. The spread is
+always on the reference leg; a market that quotes the spread on the other leg needs its quotes
+converted first.
+
 A curve set ([ADR 0017](adr/0017-curve-sets.md)) builds each of its curves after the curve that
-discounts it. A bond priced against any curve of a market is discounted on that curve's discount
-curve.
+discounts it and the reference curve of its basis quotes. A bond priced against any curve of a
+market is discounted on that curve's discount curve.
 
 ## 5. Bonds
 
@@ -388,6 +416,8 @@ Expected values in the test suite come from sources independent of this code bas
 | Dual-curve projection curve (`deposit` and `irs` on the SOFR OIS curve; `flat-forward` and `linear-zero`) at and between pillars | QuantLib 1.44 `SwapRateHelper` with a 3M `IborIndex`, an exogenous discounting curve and par coupons; 3M forwards agree to `1e-11`% | `1e-10` |
 | SOFR curve from a 3M SOFR futures strip with convexity adjustments, and a 3M projection curve with FRAs (`flat-forward` and `linear-zero`) | QuantLib 1.44 `SofrFutureRateHelper`, `FraRateHelper` | `1e-10` (agreement 1.7e-12) |
 | IMM dates, FRA and futures dates, futures rate and convexity sign | hand calculation; QuantLib helpers' own start and end dates | exact |
+| 3M Term SOFR curve from SOFR basis swaps on the SOFR curve, and 6M Term SOFR from 3M / 6M basis swaps against the 3M curve (`flat-forward` and `linear-zero`) at and between pillars | QuantLib 1.44 `OvernightIborBasisSwapRateHelper`, `IborIborBasisSwapRateHelper` (spread on the base leg, par coupons) | `1e-10` (agreement 1.9e-12) |
+| Basis spread on flat curves, with different leg frequencies; a basis swap as the difference of two swaps | hand calculation; identity | `1e-15`, `1e-14` |
 | Floating legs on a projection curve | hand calculation on flat curves | `1e-15` |
 | Curve price with z-spread | QuantLib `ZeroSpreadedTermStructure` | `1e-8` |
 | Natural cubic and monotone cubic interpolation | SciPy `CubicSpline(bc_type="natural")`, `PchipInterpolator` | `1e-11` |
