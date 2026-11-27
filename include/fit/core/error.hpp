@@ -20,8 +20,16 @@ public:
     explicit UsageError(const std::string& message) : Error(message) {}
 };
 
-/// Throws `Error(message)` when `condition` is false.
+/// Throws `Error(message)` when `condition` is false. A message built by concatenation is built
+/// before the check, so code that runs very often tests the condition itself instead.
 inline void require(bool condition, const std::string& message) {
+    if (!condition) {
+        throw Error(message);
+    }
+}
+
+/// The same for a literal message, which is only turned into a string when the check fails.
+inline void require(bool condition, const char* message) {
     if (!condition) {
         throw Error(message);
     }

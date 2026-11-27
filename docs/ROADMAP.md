@@ -28,7 +28,7 @@ Methodology decisions referenced here are recorded in the [ADRs](adr/README.md).
 | Milestone | Theme | Status |
 |-----------|-------|--------|
 | M1 | MVP: curves, fixed-rate bonds, horizon analysis, portfolio and pre-trade | Delivered (0.1.0) |
-| M2 | Curve depth | In progress (0.2.0 to 0.5.0 deliver parts of it) |
+| M2 | Curve depth | In progress (0.2.0 to 0.6.0 deliver parts of it) |
 | M3 | Instrument coverage | Planned |
 | M4 | Portfolio and risk depth | Planned |
 | M5 | Integration and performance | Planned |
@@ -82,7 +82,7 @@ roadmap item where noted.
 | Curve construction | Curves are built in sequence, each after its discount curve and the reference curve of its basis swaps, not jointly | M2 |
 | Curve construction | No turn-of-year or meeting-date handling; futures convexity adjustments are inputs, not modelled; a basis spread is always on the reference leg | M2 |
 | Curve construction | Floating coupons are par coupons (no indexed coupons, lookbacks or spreads on irs legs); swap legs share one business-day convention and payment lag | M2 |
-| Curve construction | Exact bootstrap only; no smoothing or parametric fit | M2 |
+| Curve construction | Parametric fits are to quoted rates with equal weights; no fit to clean bond prices, no weighting, no smoothing spline | M2 |
 | Interpolation | The default, `flat-forward`, has forwards that are discontinuous at nodes, and `cubic-zero` can oscillate; `monotone-convex` avoids both but is not yet the default | M2 |
 | Extrapolation | Beyond the last pillar the zero rate or the last forward is held flat, selectable with `--extrapolation`; no ultimate-forward-rate method | Not scheduled |
 | Calendars | Only weekends-only, a rule-based US government bond calendar and user-supplied holiday files; the rule-based calendar knows only a handful of historical ad hoc market closures | M2 |
@@ -124,7 +124,7 @@ The following are outside the intended scope of `fit` and are not planned:
 | Item | Description |
 |------|-------------|
 | Monotone convex interpolation | Hagan–West monotone convex scheme, with continuous positive forwards; candidate new default after validation (requires an ADR superseding the default in ADR 0007). *Scheme available as `monotone-convex` ([ADR 0014](adr/0014-monotone-convex-interpolation.md)); the default decision is outstanding.* |
-| Parametric fitting | Nelson–Siegel and Nelson–Siegel–Svensson least-squares fit to bond prices or yields, with fit diagnostics (per-instrument residuals, RMSE), as a complement to exact bootstrap |
+| Parametric fitting | Nelson–Siegel and Nelson–Siegel–Svensson least-squares fit to bond prices or yields, with fit diagnostics (per-instrument residuals, RMSE), as a complement to exact bootstrap. *Delivered: fits to quoted rates (yields, deposits, swaps) with `--fit` and per-quote residuals and RMSE ([ADR 0020](adr/0020-parametric-curve-fitting.md), 0.6.0). Open: fits to clean bond prices with duration weights.* |
 | Multi-curve construction | Separate discount (OIS) and projection curves; dual-curve bootstrap of term-rate swaps; curve sets addressable by name. *Delivered: dual-curve bootstrap and `irs` quotes ([ADR 0016](adr/0016-multi-curve-construction.md)), curve sets and `--curve-name` ([ADR 0017](adr/0017-curve-sets.md)).* |
 | Additional instruments for construction | Interest-rate futures with convexity adjustment, FRAs, swaps with explicit fixed/floating leg conventions, basis swaps. *Delivered: FRAs and quarterly IMM futures with an input convexity adjustment (0.3.0); basis swaps against a reference curve ([ADR 0019](adr/0019-basis-swaps-and-reference-curves.md), 0.4.0); payment lags on swap legs (0.5.0). Open: further leg conventions, a convexity model.* |
 | Turn-of-year and jumps | Explicit jump pillars; step-function overlay for central-bank meeting dates |

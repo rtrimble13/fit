@@ -28,6 +28,7 @@ ADRs are the authoritative explanation of *why* the code looks the way it does; 
 | [0017](0017-curve-sets.md) | Curve sets addressable by name | Proposed |
 | [0018](0018-continuous-versioning-and-automated-releases.md) | Continuous versioning and automated releases | Proposed |
 | [0019](0019-basis-swaps-and-reference-curves.md) | Basis swaps and reference curves | Proposed |
+| [0020](0020-parametric-curve-fitting.md) | Parametric curve fitting (Nelson-Siegel and Svensson) | Proposed |
 
 ## When an ADR is required
 

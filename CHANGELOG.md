@@ -16,6 +16,39 @@ until the next release. See [docs/versioning-and-releases.md](docs/versioning-an
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-27
+
+Nelson-Siegel and Svensson curve fitting, and faster curve builds. Existing outputs are
+unchanged.
+
+### Added
+
+- `--fit nelson-siegel|svensson` on every command that builds a curve: the quotes are fitted by
+  least squares, equally weighted in their own units, instead of bootstrapped.
+  - Any quote type can be fitted, on one curve or as a projection curve on a discount curve.
+  - Every command uses the fitted curve like a bootstrapped one.
+  - `fit curve build` reports the parameters, the RMSE, the largest residual and the
+    iterations. Each quote's residual appears in `error_bp`.
+  - `--fit` cannot be combined with `--interp` or `--extrapolation`.
+
+  See [METHODOLOGY.md](docs/METHODOLOGY.md#4-bootstrapping) and
+  [ADR 0020](docs/adr/0020-parametric-curve-fitting.md).
+- A `fit` column in curve-set files (`nelson-siegel`, `svensson`, or `none` to bootstrap). In a
+  multi-curve build, a fitted curve's row in the `curves` table gives its model as the
+  interpolation. A new `fits` table gives its parameters.
+- Validated against QuantLib 1.44 `NelsonSiegelFitting` and `SvenssonFitting` curves, against an
+  independent SciPy least-squares fit with instruments priced by QuantLib, and on reconstructed
+  data sets whose known parameters are recovered exactly.
+- Library: `fit::ParametricCurve`, `fit::fit_curve`, `fit::levenberg_marquardt`, and
+  `fit::QuotePricer`, which prices a quote on many curves with its schedules resolved once.
+
+### Changed
+
+- Curve builds, and commands that build curves, run about three times faster. Quote schedules
+  are resolved once per bootstrap, and curve discount factors no longer build an error message
+  on every call. Every output is unchanged.
+- `fit curve build`'s description now says it builds a curve by bootstrap or by fit.
+
 ## [0.5.0] - 2026-11-26
 
 Payment lags on swap legs. Existing outputs are unchanged.

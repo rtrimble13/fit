@@ -129,6 +129,32 @@ double basis_spread(const YieldCurve& projection, const YieldCurve& reference,
                     BusinessDayConvention convention = BusinessDayConvention::ModifiedFollowing,
                     int payment_lag = 0);
 
+/// A swap leg's or a bond's periods, resolved from its schedule: accrual start and end, payment
+/// date and accrual fraction of each.
+struct LegPlan {
+    std::vector<Date> starts;
+    std::vector<Date> ends;
+    std::vector<Date> pays;
+    std::vector<double> accruals;
+};
+
+/// A quote's instrument with its schedules resolved once, for pricing on many curves: the
+/// bootstrap and the parametric fit price each quote many times. `implied` returns exactly what
+/// `implied_quote_rate` returns for the same curves.
+class QuotePricer {
+public:
+    /// Throws fit::Error for a schedule that cannot be built (e.g. an unsupported frequency).
+    QuotePricer(Quote quote, const Calendar& calendar);
+    double implied(const YieldCurve& curve, const YieldCurve& discount,
+                   const YieldCurve* reference = nullptr) const;
+    const Quote& quote() const { return quote_; }
+
+private:
+    Quote quote_;
+    LegPlan first_;  ///< fixed leg (swap, irs), reference leg (basis) or coupons (par)
+    LegPlan second_; ///< floating leg (swap, irs) or this curve's leg (basis)
+};
+
 struct BootstrapOptions {
     InterpolationMethod method = InterpolationMethod::FlatForward;
     double tolerance = 1e-12; ///< maximum absolute repricing error (decimal rate)

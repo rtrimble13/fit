@@ -42,6 +42,10 @@ std::vector<OptionSpec> curve_options(bool required, bool select) {
          "beyond the last pillar: flat-forward | flat-zero (default: flat-zero for linear-zero "
          "and cubic-zero, flat-forward otherwise)",
          "", false},
+        {"fit", "MODEL",
+         "nelson-siegel | svensson: fit the curve to the quotes by least squares instead of "
+         "bootstrapping them (replaces --interp and --extrapolation)",
+         "", false},
         {"calendar", "NAME", "business-day calendar: none | weekends | us", "weekends", false},
         {"holidays", "FILE", "extra holidays, one ISO date per line", "", false},
         {"spot-lag", "DAYS", "business days from as-of to quote start dates", "0", false},
@@ -135,6 +139,13 @@ Market load_market(const Args& args, bool select) {
     if (const auto extrapolation = args.get("extrapolation")) {
         defaults.extrapolation = parse_extrapolation(*extrapolation);
     }
+    if (const auto fit = args.get("fit")) {
+        if (args.has("interp") || args.has("extrapolation")) {
+            throw UsageError("--fit replaces --interp and --extrapolation: a fitted curve is "
+                             "defined at every maturity");
+        }
+        defaults.fit = parse_parametric_model(*fit);
+    }
     // A curve from a quotes file under the command-line conventions.
     const auto spec = [&](std::string name, const std::string& path, std::string discount) {
         QuoteConventions conventions;
@@ -148,6 +159,7 @@ Market load_market(const Args& args, bool select) {
         s.calendar = defaults.calendar;
         s.options.method = defaults.method;
         s.options.extrapolation = defaults.extrapolation;
+        s.fit = defaults.fit;
         return s;
     };
     std::vector<CurveSpec> specs;
@@ -185,8 +197,8 @@ Market load_market(const Args& args, bool select) {
         throw Error("unknown curve '" + name + "' (curves: " + curve_names(m.curves) + ")");
     };
     const NamedCurve& chosen = find(selected);
-    m.curve = chosen.bootstrap.curve;
-    m.discount = find(chosen.discount_name).bootstrap.curve;
+    m.curve = chosen.curve;
+    m.discount = find(chosen.discount_name).curve;
     return m;
 }
 

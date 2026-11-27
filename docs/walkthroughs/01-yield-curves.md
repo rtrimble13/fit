@@ -284,6 +284,80 @@ zspread_bp,0
 Bonds that mature inside the curve, including their [horizon analysis](03-forecasting.md), do
 not depend on the rule.
 
+### Fitting instead of bootstrapping
+
+Every scheme above passes exactly through the quotes. A government bond curve is often
+*fitted* instead: a smooth parametric curve is set through the quotes by least squares, and each
+quote's residual shows how rich or cheap it is against the fit. `--fit nelson-siegel` or `--fit
+svensson` does that, in place of `--interp`:
+
+```console
+$ fit curve build --curve examples/data/usd_treasury.csv --asof 2026-11-17 --fit svensson
+curve
+=====
+as_of             2026-11-17
+fit                 svensson
+calendar            weekends
+nodes                     11
+beta0_pct           2.197502
+beta1_pct           2.234128
+beta2_pct          -0.000001
+beta3_pct           7.863878
+tau1_years          1.307982
+tau2_years         13.725072
+rmse_bp               1.8052
+max_abs_error_bp      3.0049
+fit_iterations            41
+
+nodes
+=====
+tenor  type     pillar        years  quote_pct  zero_cc_pct  discount   error_bp
+-----  -------  ----------  -------  ---------  -----------  --------  ---------
+1M     deposit  2026-12-17   0.0822     4.3200       4.3863  0.996401   1.405641
+3M     deposit  2027-02-17   0.2521     4.2800       4.3009  0.989218  -1.495747
+6M     deposit  2027-05-17   0.4959     4.2000       4.1956  0.979409  -1.850802
+1Y     par      2027-11-17   1.0000     4.0500       4.0322  0.960480   2.445621
+2Y     par      2028-11-17   2.0027     3.9000       3.8619  0.925572   0.872702
+3Y     par      2029-11-19   3.0082     3.8800       3.8171  0.891519  -1.163851
+5Y     par      2031-11-17   5.0027     3.9500       3.8971  0.822866  -1.541778
+7Y     par      2033-11-17   7.0055     4.0800       4.0513  0.752906  -0.273335
+10Y    par      2036-11-17  10.0082     4.2500       4.2797  0.651602   3.004851
+20Y    par      2046-11-19  20.0192     4.6200       4.6522  0.394029  -2.665907
+30Y    par      2056-11-17  30.0219     4.5800       4.6041  0.251013   1.234193
+```
+
+The parameters are the Svensson curve's level (`beta0`), slope (`beta1`), two humps (`beta2`,
+`beta3`) and their positions in years (`tau1`, `tau2`). The short rate is `beta0 + beta1`, about
+4.43%, and the long rate `beta0`. `error_bp` is now each quote's residual, fitted minus quoted.
+The 10Y quote yields 3.0bp less than the fitted curve, so the 10-year bond is rich against it.
+The 20Y yields 2.7bp more, so it is cheap. Nelson-Siegel, with one hump, fits less closely:
+
+```console
+$ for m in nelson-siegel svensson; do echo "--- $m"; fit curve build --curve examples/data/usd_treasury.csv --asof 2026-11-17 --fit $m --format csv | grep -E "^(rmse_bp|max_abs_error_bp),"; done
+--- nelson-siegel
+rmse_bp,3.07786808417
+max_abs_error_bp,7.49642669862
+--- svensson
+rmse_bp,1.80521925942
+max_abs_error_bp,3.00485081836
+```
+
+Every other command uses the fitted curve as it would a bootstrapped one. The 10-year bond
+prices about a quarter of a point lower on it, because the fit runs above the 10Y quote:
+
+```console
+$ for f in "" "--fit svensson"; do echo "--- ${f:-bootstrap}"; fit bond price --maturity 2036-11-15 --coupon 4.25 --curve examples/data/usd_treasury.csv --asof 2026-11-17 $f --format csv | grep -E "^clean_price,"; done
+--- bootstrap
+clean_price,99.9846191584
+--- --fit svensson
+clean_price,99.7402575558
+```
+
+The model, the search and its validation are in
+[METHODOLOGY.md](../METHODOLOGY.md#4-bootstrapping) and
+[ADR 0020](../adr/0020-parametric-curve-fitting.md). In a curve set, the `fit` column fits a
+single curve.
+
 ## 5. Forward rates
 
 `fit curve forwards` tabulates consecutive forward periods of a given length.

@@ -40,9 +40,11 @@ add_library(fit_core STATIC
   src/time/schedule.cpp
   src/math/solver.cpp
   src/math/interpolation.cpp
+  src/math/least_squares.cpp
   src/curve/yield_curve.cpp
   src/curve/bootstrap.cpp
   src/curve/curve_set.cpp
+  src/curve/parametric.cpp
   src/bond/bond.cpp
   src/bond/analytics.cpp
   src/bond/horizon.cpp

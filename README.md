@@ -47,7 +47,7 @@ shift  clean_end  yield_end_pct  coupon_income    roll  curve_shift  reinvestmen
 
 | Area | Capabilities |
 |------|--------------|
-| **Yield curves** | Bootstrap a zero curve from deposits, FRAs, 3M IMM futures (SOFR futures, with convexity adjustments), OIS and term-rate swaps, basis swaps, par bond yields and zero rates. Multi-curve: bootstrap a term-rate projection curve on an OIS discount curve, or from basis swaps against another curve's index (e.g. 6M Term SOFR from 3M). Five interpolation schemes (`flat-forward`, `linear-zero`, `cubic-zero`, `monotone-cubic`, and Hagan-West `monotone-convex` for continuous, positive forwards). Flat-forward or flat-zero extrapolation beyond the last pillar. Exact repricing of every input, reported per instrument. Zero, par, forward and instantaneous forward rates at any tenor or date; forward strips; forward-implied future curves. |
+| **Yield curves** | Bootstrap a zero curve from deposits, FRAs, 3M IMM futures (SOFR futures, with convexity adjustments), OIS and term-rate swaps, basis swaps, par bond yields and zero rates. Multi-curve: bootstrap a term-rate projection curve on an OIS discount curve, or from basis swaps against another curve's index (e.g. 6M Term SOFR from 3M). Five interpolation schemes (`flat-forward`, `linear-zero`, `cubic-zero`, `monotone-cubic`, and Hagan-West `monotone-convex` for continuous, positive forwards). Flat-forward or flat-zero extrapolation beyond the last pillar. Exact repricing of every input, reported per instrument. Or a Nelson-Siegel or Svensson least-squares fit to the same quotes, with per-quote residuals and RMSE, used by every command like a bootstrapped curve. Zero, par, forward and instantaneous forward rates at any tenor or date; forward strips; forward-implied future curves. |
 | **Bond valuation** | Price from yield, yield from price, price off a curve with a z-spread, implied z-spread from a price. Accrued interest, clean and dirty prices, cashflow schedules with discount factors. Six day-count conventions, short first coupons, month-end rolls, business-day adjusted payments. |
 | **Risk** | Macaulay and modified duration, convexity, DV01. Effective duration and convexity and key-rate DV01s by bump-and-reprice on a user-defined tenor ladder. |
 | **Forecasting** | Horizon analysis: projected price and total return to any horizon under an unchanged curve or realised forwards, with parallel shocks and curve twists. Return attribution into coupon income, roll-down, curve move and reinvestment. |
@@ -70,7 +70,7 @@ $ cmake --preset release
 $ cmake --build --preset release
 $ ctest --preset release
 $ build/release/fit --version
-fit 0.5.0
+fit 0.6.0
 ```
 
 Install to a prefix (optional):
@@ -214,7 +214,7 @@ an example.
 
 | Command | Purpose |
 |---------|---------|
-| `fit curve build` | Bootstrap a zero curve; show nodes and repricing errors |
+| `fit curve build` | Bootstrap or fit a zero curve; show nodes and repricing errors (or fit residuals and parameters) |
 | `fit curve query` | Zero, par and forward rates and discount factors at tenors or dates; `--horizon` for the forward-implied curve |
 | `fit curve forwards` | Strip of consecutive forward rates |
 | `fit bond price` | Price, yield, accrued, duration, convexity, DV01 from a yield, a price or a curve |
@@ -232,7 +232,7 @@ Option groups shared across commands:
 
 | Group | Options |
 |-------|---------|
-| Curve | `--curve FILE`, or `--discount-curve FILE --projection-curve FILE`, or `--curve-set FILE`; `--curve-name NAME` (not on `curve build`); `--asof DATE` `--interp flat-forward\|linear-zero\|cubic-zero\|monotone-cubic\|monotone-convex` `--extrapolation flat-forward\|flat-zero` `--calendar none\|weekends\|us` `--holidays FILE` `--spot-lag DAYS` `--payment-lag DAYS` |
+| Curve | `--curve FILE`, or `--discount-curve FILE --projection-curve FILE`, or `--curve-set FILE`; `--curve-name NAME` (not on `curve build`); `--asof DATE` `--interp flat-forward\|linear-zero\|cubic-zero\|monotone-cubic\|monotone-convex` `--extrapolation flat-forward\|flat-zero` or `--fit nelson-siegel\|svensson` `--calendar none\|weekends\|us` `--holidays FILE` `--spot-lag DAYS` `--payment-lag DAYS` |
 | Bond | `--maturity DATE` `--coupon PCT` `--frequency 1\|2\|4\|12` `--daycount DC` `--issue DATE` `--settle DATE` `--settle-days N` `--no-eom` |
 | Mark | one of `--price PX` (clean), `--yield PCT`, `--zspread BP`; none means "on the curve, no spread" |
 | Risk | `--key-tenors LIST` `--bump-bp BP` |
@@ -290,6 +290,7 @@ treasury,usd_treasury.csv,,,weekends,0
 | `discount` | no | the curve that discounts it; empty for a curve that discounts itself |
 | `reference` | no | the curve whose index the other leg of this curve's `basis` quotes pays; empty for the discount curve |
 | `interp`, `extrapolation`, `calendar`, `spot_lag`, `payment_lag` | no | override the command line for this curve |
+| `fit` | no | `nelson-siegel` or `svensson` to fit this curve instead of bootstrapping it, or `none`; overrides `--fit`, and excludes `interp` and `extrapolation` |
 
 `--curve-name` picks the curve a command uses; bonds discount on that curve's discount curve.
 `fit curve build` reports every curve. With `--curve` the curve is named `curve`, and with the
@@ -388,7 +389,8 @@ fit is pre-1.0. The main things it does not do, each scheduled in the
 - **Instruments:** fixed-rate bullet and zero-coupon bonds only. No floaters, callables,
   amortisers, inflation-linked bonds or bills on a discount basis.
 - **Curves:** a projection curve is built after its discount and reference curves, not
-  jointly with them; no futures convexity model, no parametric fits.
+  jointly with them; no futures convexity model. Nelson-Siegel and Svensson fits are to quoted
+  rates with equal weights, not to clean bond prices.
   Extrapolation beyond the last pillar is flat (forward or zero rate), with no ultimate
   forward rate.
 - **Yields and spreads:** street-convention yield and z-spread only; no G-spread, asset-swap
