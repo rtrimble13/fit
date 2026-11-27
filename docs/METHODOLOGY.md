@@ -268,6 +268,43 @@ A curve set ([ADR 0017](adr/0017-curve-sets.md)) builds each of its curves after
 discounts it and the reference curve of its basis quotes. A bond priced against any curve of a
 market is discounted on that curve's discount curve.
 
+**Parametric fits** ([ADR 0020](adr/0020-parametric-curve-fitting.md)). With `--fit
+nelson-siegel` or `--fit svensson` (or a curve set's `fit` column), the curve is not bootstrapped
+but fitted. The model is the continuously compounded ACT/365F zero rate
+
+`z(t) = b0 + b1 L(t/tau1) + b2 C(t/tau1) [+ b3 C(t/tau2)]`, `L(x) = (1 - e^-x)/x`,
+`C(x) = L(x) - e^-x`,
+
+with `DF(t) = exp(-z(t) t)` and instantaneous forward
+`f(t) = b0 + b1 e^-x + b2 x e^-x [+ b3 y e^-y]` (`x = t/tau1`, `y = t/tau2`). The short rate
+is `b0 + b1` and the long rate `b0`. Nelson-Siegel has four parameters, Svensson six (the bracketed
+term); this is QuantLib's `NelsonSiegelFitting` and `SvenssonFitting` with `kappa = 1/tau`.
+
+The fit minimises `sum_i (r_i(model) - q_i)^2` over the quotes, equally weighted, where
+`r_i(model)` is the model-implied rate of quote `i` as in the bootstrap tables above, discounted
+on the discount curve for a projection curve, and `q_i` is the quote. It needs at least as many
+quotes as parameters, and quotes may share a pillar.
+
+- **Search.** Levenberg-Marquardt runs over `(b0, b1, b2, [b3], ln tau1, [ln tau2])`, with each
+  tau bounded to [0.05, 50] years. It starts from a fixed grid of taus, with `b0` at the longest
+  quote, `b0 + b1` at the shortest and no curvature:
+  - Nelson-Siegel: 0.5, 1, 2, 3, 5, 8 and 12 years;
+  - Svensson: every ordered pair of distinct values from 0.5, 1, 2, 4, 8 and 16 years, since
+    its two taus are not interchangeable.
+- **Selection.** Each start runs 20 steps, the three lowest are refined for up to 200, and the
+  lowest cost is kept.
+- **Report.** `fit curve build` shows:
+  - the parameters (betas in percent, taus in years);
+  - the RMSE and the largest absolute residual, in bp;
+  - each quote's residual in the nodes table's `error_bp`, with the zero rate and discount
+    factor read off the fitted curve at its pillar.
+- **Use.** The fitted curve has no interpolation or extrapolation, so `--interp` and
+  `--extrapolation` are rejected with `--fit`. It is used like any other curve, including risk
+  by bumping its zero rates.
+
+Svensson's parameters can be weakly identified: on the example Treasury quotes, the second
+curvature barely changes the fit, and different parameters reach the same RMSE to 1e-9bp.
+
 ## 5. Bonds
 
 A bond pays `100 c tau_i` at the end of each period, where `tau_i` is the year fraction of
@@ -412,6 +449,7 @@ date. The DV01 limit check compares `|total dv01|` after trading with the limit.
 | Bootstrap zero-rate range | -25% to 200% | |
 | Bootstrap convergence | max repricing error | `1e-12` (rate, decimal) |
 | Risk | central differences, 1bp default bump | |
+| Parametric fits | Levenberg-Marquardt, central-difference Jacobian, multi-start over taus | stops at a relative cost reduction below `1e-15` |
 
 Text tables round for display; CSV and JSON carry 12 significant digits.
 
@@ -434,6 +472,10 @@ Expected values in the test suite come from sources independent of this code bas
 | Lagged `irs` quotes on a projection curve | each quote repriced by QuantLib `FixedRateLeg` and `IborLeg` with `paymentLag` 2 on fit's curves | `1e-12`; pillars exact |
 | A lagged swap on a flat curve | hand calculation | `1e-15` |
 | Floating legs on a projection curve | hand calculation on flat curves | `1e-15` |
+| Nelson-Siegel and Svensson discount factors | QuantLib 1.44 `FittedBondDiscountCurve` with `NelsonSiegelFitting` and `SvenssonFitting` at given parameters | `1e-14` |
+| Nelson-Siegel and Svensson fits of the example Treasury quotes | SciPy 1.18 `least_squares` from the same grid of starts, with deposits and par yields priced by QuantLib 1.44 (`FittedBondDiscountCurve`, `FixedRateLeg`, `ActualActual(ISMA)`) | Nelson-Siegel parameters `2e-8` relative, residuals `1e-5`bp; Svensson RMSE `1e-9`bp, residuals `2e-4`bp, parameters `1e-6` |
+| Reconstructed data set: zero yields at 1 to 30 years from known Svensson and Nelson-Siegel parameters, including taus in either order | exact recovery of the parameters; with yields rounded to four decimals in percent, as published by the Federal Reserve, RMSE within the rounding noise (0.003bp) | `1e-12`; `1bp` betas, `0.2%` taus |
+| Levenberg-Marquardt | closed-form straight-line least squares; the Rosenbrock valley, free and with a bound | `1e-10`, `1e-9` |
 | Curve price with z-spread | QuantLib `ZeroSpreadedTermStructure` | `1e-8` |
 | Natural cubic and monotone cubic interpolation | SciPy `CubicSpline(bc_type="natural")`, `PchipInterpolator` | `1e-11` |
 | Monotone convex interpolation: forwards in every region, with uneven spacing and negative and mixed-sign rates | QuantLib 1.44 `ConvexMonotoneInterpolation` with quadraticity 0, monotonicity 1, `forcePositive` false (the published method); hand calculations for each region and for the positivity bounds | `1e-15` |

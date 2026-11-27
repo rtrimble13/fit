@@ -77,11 +77,22 @@ std::vector<NamedCurve> build_curve_set(Date as_of, const std::vector<CurveSpec>
                 continue;
             }
             BootstrapOptions options = s.options;
-            options.discount = discount != nullptr ? discount->bootstrap.curve : nullptr;
-            options.reference = reference != nullptr ? reference->bootstrap.curve : nullptr;
+            options.discount = discount != nullptr ? discount->curve : nullptr;
+            options.reference = reference != nullptr ? reference->curve : nullptr;
             try {
-                built.push_back({s.name, discounts_itself(s) ? s.name : s.discount, s.calendar,
-                                 bootstrap(as_of, s.quotes, s.calendar, options)});
+                NamedCurve c;
+                c.name = s.name;
+                c.discount_name = discounts_itself(s) ? s.name : s.discount;
+                c.calendar = s.calendar;
+                if (s.fit) {
+                    c.fit = fit_curve(as_of, s.quotes, s.calendar,
+                                      {*s.fit, options.discount, options.reference});
+                    c.curve = c.fit->curve;
+                } else {
+                    c.bootstrap = bootstrap(as_of, s.quotes, s.calendar, options);
+                    c.curve = c.bootstrap.curve;
+                }
+                built.push_back(std::move(c));
             } catch (const Error& e) {
                 throw Error(specs.size() > 1 ? "curve '" + s.name + "': " + e.what() : e.what());
             }
@@ -107,7 +118,7 @@ std::vector<CurveSpec> load_curve_set(const std::string& path, Date as_of,
                                       const CurveSetDefaults& defaults) {
     const CsvTable csv = CsvTable::read(path);
     csv.require_columns_in({"name", "quotes", "discount", "reference", "interp", "extrapolation",
-                            "calendar", "spot_lag", "payment_lag"});
+                            "fit", "calendar", "spot_lag", "payment_lag"});
     const std::filesystem::path base = std::filesystem::path(path).parent_path();
     std::vector<CurveSpec> specs;
     for (std::size_t i = 0; i < csv.size(); ++i) {
@@ -128,6 +139,14 @@ std::vector<CurveSpec> load_curve_set(const std::string& path, Date as_of,
             if (const auto extrapolation = csv.get(i, "extrapolation")) {
                 s.options.extrapolation = parse_extrapolation(*extrapolation);
             }
+            s.fit = defaults.fit;
+            if (const auto fit = csv.get(i, "fit")) {
+                s.fit = to_lower(*fit) == "none" ? std::nullopt
+                                                 : std::optional(parse_parametric_model(*fit));
+            }
+            require(!s.fit || (!csv.get(i, "interp") && !csv.get(i, "extrapolation")),
+                    "a fitted curve (fit " + (s.fit ? to_string(*s.fit) : std::string()) +
+                        ") takes no interp or extrapolation: it is defined at every maturity");
             QuoteConventions conventions;
             conventions.calendar = s.calendar;
             conventions.settle_days = defaults.settle_days;

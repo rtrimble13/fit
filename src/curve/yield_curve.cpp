@@ -151,8 +151,10 @@ ZeroShift ZeroShift::scaled(double factor) const {
 // YieldCurve
 
 double YieldCurve::discount(Date date) const {
-    require(date >= as_of_,
-            "date " + date.to_string() + " precedes the curve as-of date " + as_of_.to_string());
+    if (date < as_of_) { // tested here rather than by require: this runs very often
+        throw Error("date " + date.to_string() + " precedes the curve as-of date " +
+                    as_of_.to_string());
+    }
     return discount_t(time(date));
 }
 

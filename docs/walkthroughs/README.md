@@ -23,7 +23,7 @@ $ cmake --preset release
 $ cmake --build --preset release
 $ export PATH="$PWD/build/release:$PATH"
 $ fit --version
-fit 0.5.0
+fit 0.6.0
 ```
 
 Conventions used everywhere:

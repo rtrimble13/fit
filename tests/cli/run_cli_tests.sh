@@ -188,6 +188,35 @@ expect_exit 0 curve build --curve "$BAD" "${SOFR[@]}" --payment-lag 2
 expect_out '^1Y +swap +2027-11-22 '            # the row's lag of 1 overrides --payment-lag
 rm -f "$BAD"
 
+# ---- fitted curves: Nelson-Siegel and Svensson by least squares ---------------------------
+expect_exit 0 curve build "${CURVE[@]}" --fit nelson-siegel
+expect_out '^fit +nelson-siegel$'
+expect_out '^tau1_years +2\.087849$'
+expect_out '^rmse_bp +3\.0779$'
+expect_out '^20Y +par +2046-11-19 .* -7\.49642[0-9]$'   # the residual is the fit's error
+expect_exit 0 curve build "${CURVE[@]}" --fit svensson --format csv
+expect_out '^rmse_bp,1\.80521925'
+# Every command uses the fitted curve; it is defined at every maturity.
+expect_exit 0 curve query "${CURVE[@]}" --fit svensson --tenors 50Y --format csv
+expect_out '^50Y,2076-11-17,'
+expect_exit 0 bond risk "${BOND[@]}" "${CURVE[@]}" --fit nelson-siegel --price 99.9375
+expect_out '^key_rates$'
+expect_exit 2 curve build "${CURVE[@]}" --fit svensson --interp linear-zero
+expect_err '--fit replaces --interp and --extrapolation: a fitted curve is defined at every maturity'
+expect_exit 2 curve build "${CURVE[@]}" --fit svensson --extrapolation flat-zero
+expect_exit 1 curve build "${CURVE[@]}" --fit spline
+expect_err "unknown fit model 'spline' \(expected nelson-siegel or svensson\)"
+BAD="$(mktemp)"
+printf 'type,tenor,rate\npar,2Y,3.9\npar,5Y,3.95\npar,10Y,4.25\n' >"$BAD"
+expect_exit 1 curve build --curve "$BAD" --asof 2026-11-17 --fit nelson-siegel
+expect_err 'nelson-siegel fit: the model has 4 parameters, so it needs at least 4 quotes, not 3'
+printf 'name,quotes,discount,fit\nsofr,%s/usd_sofr.csv,,\ntsy,%s/usd_treasury.csv,,svensson\n' "$PWD/$DATA" "$PWD/$DATA" >"$BAD"
+expect_exit 0 curve build --curve-set "$BAD" --asof 2026-11-17
+expect_out '^tsy +tsy +svensson +weekends +11 +0 +3\.0048'
+expect_out '^fits$'
+expect_out '^tsy +svensson +2\.19750[0-9] '
+rm -f "$BAD"
+
 # ---- curve sets: any number of named curves -----------------------------------------------
 SET=(--curve-set "$DATA/usd_curves.csv" --asof 2026-11-17)
 expect_exit 0 curve build "${SET[@]}"

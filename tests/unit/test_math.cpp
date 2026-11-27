@@ -1,5 +1,6 @@
 #include "fit/core/error.hpp"
 #include "fit/math/interpolation.hpp"
+#include "fit/math/least_squares.hpp"
 #include "fit/math/solver.hpp"
 
 #include <doctest/doctest.h>
@@ -341,4 +342,69 @@ TEST_CASE("monotone convex: a breakpoint that rounds onto the node stays finite"
     REQUIRE(std::isfinite(mc.derivative(below)));
     CHECK(mc.value(below) == doctest::Approx(mc.value(node)).epsilon(1e-15));
     CHECK(mc.derivative(below) == doctest::Approx(mc.derivative(node)).epsilon(1e-15));
+}
+
+TEST_CASE("least squares: a straight line matches the normal equations") {
+    // y = a + b x by least squares: b = Sxy / Sxx, a = ybar - b xbar in centred sums.
+    const std::vector<double> x{0.0, 1.0, 2.0, 4.0, 7.0};
+    const std::vector<double> y{1.1, 2.9, 5.2, 8.8, 15.3};
+    double xbar = 0.0;
+    double ybar = 0.0;
+    for (std::size_t i = 0; i < x.size(); ++i) {
+        xbar += x[i] / static_cast<double>(x.size());
+        ybar += y[i] / static_cast<double>(x.size());
+    }
+    double sxy = 0.0;
+    double sxx = 0.0;
+    for (std::size_t i = 0; i < x.size(); ++i) {
+        sxy += (x[i] - xbar) * (y[i] - ybar);
+        sxx += (x[i] - xbar) * (x[i] - xbar);
+    }
+    const double b = sxy / sxx;
+    const double a = ybar - b * xbar;
+    const LeastSquaresResult r = levenberg_marquardt(
+        [&](const std::vector<double>& p) {
+            std::vector<double> residuals;
+            for (std::size_t i = 0; i < x.size(); ++i) {
+                residuals.push_back(p[0] + p[1] * x[i] - y[i]);
+            }
+            return residuals;
+        },
+        {0.0, 0.0});
+    CHECK(r.x[0] == doctest::Approx(a).epsilon(1e-10));
+    CHECK(r.x[1] == doctest::Approx(b).epsilon(1e-10));
+    CHECK(r.iterations > 0);
+}
+
+TEST_CASE("least squares: the Rosenbrock valley and bounds") {
+    // Residuals (10 (y - x^2), 1 - x): the classic curved valley, minimum 0 at (1, 1).
+    const ResidualFunction rosenbrock = [](const std::vector<double>& p) {
+        return std::vector<double>{10.0 * (p[1] - p[0] * p[0]), 1.0 - p[0]};
+    };
+    const LeastSquaresResult r = levenberg_marquardt(rosenbrock, {-1.2, 1.0});
+    CHECK(r.x[0] == doctest::Approx(1.0).epsilon(1e-9));
+    CHECK(r.x[1] == doctest::Approx(1.0).epsilon(1e-9));
+    CHECK(r.cost < 1e-20);
+    // With x bounded above by 0.5 the minimum is on the bound, at y = x^2.
+    LeastSquaresOptions bounded;
+    bounded.lower = {-10.0, -10.0};
+    bounded.upper = {0.5, 10.0};
+    const LeastSquaresResult b = levenberg_marquardt(rosenbrock, {-1.2, 1.0}, bounded);
+    CHECK(b.x[0] == 0.5);
+    CHECK(b.x[1] == doctest::Approx(0.25).epsilon(1e-9));
+    // A start outside the bounds is projected onto them first.
+    const LeastSquaresResult projected = levenberg_marquardt(rosenbrock, {3.0, 1.0}, bounded);
+    CHECK(projected.x[0] == 0.5);
+}
+
+TEST_CASE("least squares: invalid problems are rejected") {
+    const ResidualFunction f = [](const std::vector<double>& p) { return p; };
+    CHECK_THROWS_AS(levenberg_marquardt(f, {}), Error);
+    LeastSquaresOptions wrong;
+    wrong.lower = {0.0};
+    CHECK_THROWS_AS(levenberg_marquardt(f, {1.0, 2.0}, wrong), Error);
+    CHECK_THROWS_WITH(
+        levenberg_marquardt(
+            [](const std::vector<double>&) { return std::vector<double>{std::nan("")}; }, {1.0}),
+        "least squares: the residuals at the start are not finite");
 }

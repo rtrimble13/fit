@@ -9,18 +9,24 @@ namespace fit::cli {
 
 namespace {
 
-// One row per quote of `b`, led by the curve's name when the market has several curves.
-void add_nodes(Table& nodes, const NamedCurve* named, const BootstrapResult& b) {
-    for (std::size_t i = 0; i < b.quotes.size(); ++i) {
-        const Quote& q = b.quotes[i];
+// One row per quote of `c`, led by the curve's name when the market has several curves. For a
+// fitted curve the years, zero rate and discount factor are the curve's at the pillar, and the
+// error is the fit's residual.
+void add_nodes(Table& nodes, const NamedCurve& c, bool named) {
+    const std::vector<Quote>& quotes = c.fit ? c.fit->quotes : c.bootstrap.quotes;
+    const std::vector<double>& implied = c.fit ? c.fit->implied : c.bootstrap.implied;
+    for (std::size_t i = 0; i < quotes.size(); ++i) {
+        const Quote& q = quotes[i];
         std::vector<Cell> row;
-        if (named != nullptr) {
-            row.emplace_back(named->name);
+        if (named) {
+            row.emplace_back(c.name);
         }
+        const double years = c.fit ? c.curve->time(q.pillar) : c.bootstrap.curve->times()[i];
+        const double zero =
+            c.fit ? c.curve->zero_rate(q.pillar) : c.bootstrap.curve->zero_rates()[i];
         for (Cell cell : std::vector<Cell>{
-                 q.label, to_string(q.type), q.pillar.to_string(), b.curve->times()[i],
-                 q.rate * 100.0, b.curve->zero_rates()[i] * 100.0, b.curve->discount(q.pillar),
-                 (b.implied[i] - q.rate) * 1e4}) {
+                 q.label, to_string(q.type), q.pillar.to_string(), years, q.rate * 100.0,
+                 zero * 100.0, c.curve->discount(q.pillar), (implied[i] - q.rate) * 1e4}) {
             row.push_back(std::move(cell));
         }
         nodes.row(std::move(row));
@@ -33,18 +39,69 @@ void node_columns(Table& nodes) {
     nodes.column("error_bp", 6);
 }
 
-// Several curves: one summary row per curve and one nodes table led by the curve's name.
+constexpr int kParameterDecimals = 6;
+
+// A fitted curve's parameters, residual statistics and iterations as key-value rows.
+void add_fit_summary(Table& summary, const FitResult& fit) {
+    const ParametricParameters& p = fit.curve->parameters();
+    const bool svensson = fit.curve->model() == ParametricModel::Svensson;
+    summary.add("beta0_pct", p.beta0 * 100.0, kParameterDecimals);
+    summary.add("beta1_pct", p.beta1 * 100.0, kParameterDecimals);
+    summary.add("beta2_pct", p.beta2 * 100.0, kParameterDecimals);
+    if (svensson) {
+        summary.add("beta3_pct", p.beta3 * 100.0, kParameterDecimals);
+    }
+    summary.add("tau1_years", p.tau1, kParameterDecimals);
+    if (svensson) {
+        summary.add("tau2_years", p.tau2, kParameterDecimals);
+    }
+    summary.add("rmse_bp", fit.rmse * 1e4, 4);
+    summary.add("max_abs_error_bp", fit.max_error * 1e4, 4);
+    summary.add("fit_iterations", fit.iterations, 0);
+}
+
+// Several curves: one summary row per curve and one nodes table led by the curve's name. Fitted
+// curves report their model as their interpolation, no extrapolation and no bootstrap passes,
+// and their parameters in a `fits` table.
 void multi_curve_build(const Market& m, Report& report) {
     Table& curves = report.add(Table("curves"));
     curves.column("curve").column("discount_curve").column("interpolation");
     curves.column("extrapolation").column("calendar").column("nodes", 0);
     curves.column("bootstrap_passes", 0).column("max_repricing_error_bp", 8);
+    bool fitted = false;
     for (const NamedCurve& c : m.curves) {
+        if (c.fit) {
+            fitted = true;
+            curves.row({c.name, c.discount_name, to_string(c.fit->curve->model()), std::string(),
+                        c.calendar.name(), static_cast<double>(c.fit->quotes.size()), 0.0,
+                        c.fit->max_error * 1e4});
+            continue;
+        }
         const BootstrapResult& b = c.bootstrap;
         curves.row({c.name, c.discount_name, to_string(b.curve->method()),
                     to_string(b.curve->extrapolation()), c.calendar.name(),
                     static_cast<double>(b.quotes.size()), static_cast<double>(b.passes),
                     b.max_error * 1e4});
+    }
+    if (fitted) {
+        Table& fits = report.add(Table("fits"));
+        fits.column("curve").column("model");
+        for (const char* beta : {"beta0_pct", "beta1_pct", "beta2_pct", "beta3_pct"}) {
+            fits.column(beta, kParameterDecimals);
+        }
+        fits.column("tau1_years", kParameterDecimals).column("tau2_years", kParameterDecimals);
+        fits.column("rmse_bp", 4).column("max_abs_error_bp", 4).column("fit_iterations", 0);
+        for (const NamedCurve& c : m.curves) {
+            if (!c.fit) {
+                continue;
+            }
+            const ParametricParameters& p = c.fit->curve->parameters();
+            const bool svensson = c.fit->curve->model() == ParametricModel::Svensson;
+            fits.row({c.name, to_string(c.fit->curve->model()), p.beta0 * 100.0, p.beta1 * 100.0,
+                      p.beta2 * 100.0, svensson ? Cell(p.beta3 * 100.0) : Cell(std::string()),
+                      p.tau1, svensson ? Cell(p.tau2) : Cell(std::string()), c.fit->rmse * 1e4,
+                      c.fit->max_error * 1e4, static_cast<double>(c.fit->iterations)});
+        }
     }
     Table& summary = report.add(Table::key_value("market"));
     summary.add("as_of", m.as_of.to_string());
@@ -53,7 +110,7 @@ void multi_curve_build(const Market& m, Report& report) {
     nodes.column("curve");
     node_columns(nodes);
     for (const NamedCurve& c : m.curves) {
-        add_nodes(nodes, &c, c.bootstrap);
+        add_nodes(nodes, c, true);
     }
 }
 
@@ -63,20 +120,27 @@ void curve_build(const Args& args, Report& report) {
         multi_curve_build(m, report);
         return;
     }
-    const BootstrapResult& b = m.curves.front().bootstrap;
-
+    const NamedCurve& c = m.curves.front();
     Table& summary = report.add(Table::key_value("curve"));
     summary.add("as_of", m.as_of.to_string());
-    summary.add("interpolation", to_string(b.curve->method()));
-    summary.add("extrapolation", to_string(b.curve->extrapolation()));
-    summary.add("calendar", m.calendar.name());
-    summary.add("nodes", static_cast<double>(b.quotes.size()), 0);
-    summary.add("bootstrap_passes", b.passes, 0);
-    summary.add("max_repricing_error_bp", b.max_error * 1e4, 8);
+    if (c.fit) {
+        summary.add("fit", to_string(c.fit->curve->model()));
+        summary.add("calendar", m.calendar.name());
+        summary.add("nodes", static_cast<double>(c.fit->quotes.size()), 0);
+        add_fit_summary(summary, *c.fit);
+    } else {
+        const BootstrapResult& b = c.bootstrap;
+        summary.add("interpolation", to_string(b.curve->method()));
+        summary.add("extrapolation", to_string(b.curve->extrapolation()));
+        summary.add("calendar", m.calendar.name());
+        summary.add("nodes", static_cast<double>(b.quotes.size()), 0);
+        summary.add("bootstrap_passes", b.passes, 0);
+        summary.add("max_repricing_error_bp", b.max_error * 1e4, 8);
+    }
 
     Table& nodes = report.add(Table("nodes"));
     node_columns(nodes);
-    add_nodes(nodes, nullptr, b);
+    add_nodes(nodes, c, false);
 }
 
 void curve_query(const Args& args, Report& report) {
@@ -137,7 +201,8 @@ void curve_forwards(const Args& args, Report& report) {
 std::vector<Command> curve_commands() {
     const std::string example_curve = "--curve examples/data/usd_treasury.csv --asof 2026-11-17";
     return {
-        {"curve", "build", "Bootstrap a zero curve from market quotes and show its nodes",
+        {"curve", "build",
+         "Build a zero curve from market quotes, by bootstrap or by fit, and show its nodes",
          curve_options(true, false),
          "fit curve build " + example_curve + " --interp monotone-cubic", curve_build},
         {"curve", "query",

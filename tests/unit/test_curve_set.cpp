@@ -158,6 +158,47 @@ TEST_CASE("curve set: reference curves are checked") {
                       "reference, or name a reference curve in a curve set");
 }
 
+TEST_CASE("curve set: fitted curves") {
+    // A fitted curve is built by the fit and used like any other: a projection curve can be
+    // bootstrapped on it.
+    CurveSpec ois = spec("ois", "usd_sofr.csv", "");
+    ois.fit = ParametricModel::Svensson;
+    const std::vector<NamedCurve> built =
+        build_curve_set(kAsOf, {spec("3m", "usd_term_sofr_3m.csv", "ois"), ois});
+    REQUIRE(built.size() == 2);
+    REQUIRE(built[0].fit.has_value());
+    if (const auto& fitted = built[0].fit) {
+        CHECK(built[0].curve == fitted->curve);
+        CHECK(fitted->curve->model() == ParametricModel::Svensson);
+    }
+    CHECK(built[0].bootstrap.curve == nullptr);
+    CHECK_FALSE(built[1].fit.has_value());
+    CHECK(built[1].curve == built[1].bootstrap.curve);
+    CHECK(built[1].bootstrap.max_error < 1e-12);
+    BootstrapOptions options;
+    options.discount = built[0].curve;
+    const BootstrapResult direct =
+        bootstrap(kAsOf, load_quotes(kData + "/usd_term_sofr_3m.csv", kAsOf, sofr_conventions()),
+                  sofr_conventions().calendar, options);
+    CHECK(built[1].bootstrap.curve->zero_rates() == direct.curve->zero_rates());
+
+    // In a file, `fit` replaces the default and `none` bootstraps; a fitted row takes no
+    // interpolation or extrapolation.
+    const TempFile file("name,quotes,fit\na," + kData + "/usd_treasury.csv,nelson-siegel\nb," +
+                        kData + "/usd_treasury.csv,none\nc," + kData + "/usd_treasury.csv,\n");
+    CurveSetDefaults defaults;
+    defaults.fit = ParametricModel::Svensson;
+    const std::vector<CurveSpec> specs = load_curve_set(file.path, kAsOf, defaults);
+    CHECK(specs[0].fit == ParametricModel::NelsonSiegel);
+    CHECK_FALSE(specs[1].fit.has_value());
+    CHECK(specs[2].fit == ParametricModel::Svensson);
+    const TempFile both("name,quotes,fit,interp\na," + kData +
+                        "/usd_treasury.csv,svensson,linear-zero\n");
+    const std::string message = both.path + ":2: a fitted curve (fit svensson) takes no interp or "
+                                            "extrapolation: it is defined at every maturity";
+    CHECK_THROWS_WITH(load_curve_set(both.path, kAsOf, {}), message.c_str());
+}
+
 TEST_CASE("curve set: the example file resolves paths and per-curve conventions") {
     CurveSetDefaults defaults;
     defaults.method = InterpolationMethod::MonotoneConvex;

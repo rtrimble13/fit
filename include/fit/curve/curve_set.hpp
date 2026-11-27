@@ -1,6 +1,7 @@
 #pragma once
 
 #include "fit/curve/bootstrap.hpp"
+#include "fit/curve/parametric.hpp"
 #include "fit/time/calendar.hpp"
 #include "fit/time/date.hpp"
 
@@ -23,14 +24,19 @@ struct CurveSpec {
     Calendar calendar; ///< for the instruments' schedules
     /// `options.discount` and `options.reference` are filled in when the set is built.
     BootstrapOptions options;
+    /// Fit this model to the quotes by least squares instead of bootstrapping them (ADR 0020);
+    /// `options.method` and `options.extrapolation` are then unused.
+    std::optional<ParametricModel> fit;
 };
 
-/// A built curve under its name.
+/// A built curve under its name: bootstrapped, or fitted (ADR 0020).
 struct NamedCurve {
     std::string name;
-    std::string discount_name; ///< the curve it is discounted on (its own name if itself)
-    Calendar calendar;         ///< the calendar its instruments were scheduled on
-    BootstrapResult bootstrap;
+    std::string discount_name;    ///< the curve it is discounted on (its own name if itself)
+    Calendar calendar;            ///< the calendar its instruments were scheduled on
+    CurvePtr curve;               ///< the built curve, whichever way it was built
+    BootstrapResult bootstrap;    ///< a bootstrapped curve's result (empty for a fitted curve)
+    std::optional<FitResult> fit; ///< a fitted curve's result
 };
 
 /// Builds every curve of `specs`, each after the curve that discounts it (ADR 0016) and the
@@ -48,13 +54,15 @@ struct CurveSetDefaults {
     Calendar calendar;
     int settle_days = 0;
     int payment_lag = 0;
+    std::optional<ParametricModel> fit; ///< fit this model instead of bootstrapping
 };
 
 /// Reads a curve-set CSV with columns `name,quotes` and optional `discount`, `reference`,
-/// `interp`, `extrapolation`, `calendar`, `spot_lag` and `payment_lag`, and loads each row's
-/// quotes file. Relative quotes paths are relative to the set file's directory. A row's
+/// `interp`, `extrapolation`, `fit`, `calendar`, `spot_lag` and `payment_lag`, and loads each
+/// row's quotes file. Relative quotes paths are relative to the set file's directory. A row's
 /// `calendar` (none, weekends or us) replaces the default calendar, holidays included, for that
-/// curve.
+/// curve. A row's `fit` (nelson-siegel, svensson, or none to bootstrap) replaces the default;
+/// a fitted row may not give `interp` or `extrapolation`.
 std::vector<CurveSpec> load_curve_set(const std::string& path, Date as_of,
                                       const CurveSetDefaults& defaults);
 
