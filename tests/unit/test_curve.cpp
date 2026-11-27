@@ -886,6 +886,116 @@ TEST_CASE("bootstrap: basis swaps are quoted by spread") {
     CHECK(quotes[0].rate == doctest::Approx(0.0414).epsilon(1e-15));
 }
 
+QuoteConventions lagged_conventions() {
+    QuoteConventions conventions = sofr_conventions();
+    conventions.payment_lag = 2;
+    return conventions;
+}
+
+TEST_CASE("bootstrap: payment lag conventions") {
+    // Swap legs pay two business days after each period's adjusted end, and the pillar moves to
+    // the last payment: the 1Y SOFR swap from 2026-11-19 ends on Friday 2027-11-19 and pays on
+    // Tuesday 2027-11-23. QuantLib's OISRateHelper(paymentLag = 2) gives the same pillar.
+    const QuoteConventions lagged = lagged_conventions();
+    for (const QuoteType type : {QuoteType::Swap, QuoteType::Irs, QuoteType::Basis}) {
+        CAPTURE(to_string(type));
+        const Quote q = make_quote(kAsOf, type, "1Y", 0.04, lagged);
+        CHECK(q.payment_lag == 2);
+        CHECK(q.maturity == Date(2027, 11, 19));
+        CHECK(q.pillar == Date(2027, 11, 23));
+    }
+    // 2028-11-20 is a Monday; Thanksgiving falls on the 23rd, after the Wednesday payment.
+    CHECK(make_quote(kAsOf, QuoteType::Swap, "2Y", 0.04, lagged).pillar == Date(2028, 11, 22));
+    // Other quotes pay once, at their own dates, and ignore the lag.
+    for (const QuoteType type : {QuoteType::Deposit, QuoteType::Fra, QuoteType::Par}) {
+        CAPTURE(to_string(type));
+        const std::string tenor = type == QuoteType::Fra ? "3x6" : "1Y";
+        const Quote q = make_quote(kAsOf, type, tenor, 0.04, lagged);
+        CHECK(q.payment_lag == 0);
+        CHECK(q.pillar == make_quote(kAsOf, type, tenor, 0.04, sofr_conventions()).pillar);
+    }
+    QuoteConventions negative = sofr_conventions();
+    negative.payment_lag = -1;
+    CHECK_THROWS_WITH(make_quote(kAsOf, QuoteType::Swap, "1Y", 0.04, negative),
+                      "quote '1Y': the payment lag must be non-negative");
+}
+
+TEST_CASE("swap rate: legs paid after a lag on flat curves") {
+    // A 2Y annual swap from Thursday 2026-11-19 on a flat 4% curve (continuously compounded,
+    // ACT/365F), business days only. Periods end 2027-11-19 (Friday) and 2028-11-20 (Monday) and
+    // pay two business days later, on 2027-11-23 and 2028-11-22. On one curve the floating coupons
+    // no longer telescope: each is DF(pay) (DF(s) / DF(e) - 1).
+    const InterpolatedCurve curve(kAsOf, {1.0}, {0.04}, InterpolationMethod::FlatForward);
+    const Calendar weekends(Calendar::Rules::WeekendsOnly);
+    const auto df = [](Date d) { return std::exp(-0.04 * (d - kAsOf) / 365.0); };
+    const Date s(2026, 11, 19);
+    const Date e1(2027, 11, 19);
+    const Date e2(2028, 11, 20);
+    const Date p1(2027, 11, 23);
+    const Date p2(2028, 11, 22);
+    const double floating = df(p1) * (df(s) / df(e1) - 1.0) + df(p2) * (df(e1) / df(e2) - 1.0);
+    const double annuity = (e1 - s) / 360.0 * df(p1) + (e2 - e1) / 360.0 * df(p2);
+    const double lagged = swap_rate(curve, s, Date(2028, 11, 19), 1, DayCount::Act360, weekends,
+                                    BusinessDayConvention::ModifiedFollowing, 2);
+    CHECK(lagged == doctest::Approx(floating / annuity).epsilon(1e-15));
+    CHECK(lagged != swap_rate(curve, s, Date(2028, 11, 19), 1, DayCount::Act360, weekends));
+    // With a projection curve, and for a basis swap, the lag moves every payment the same way: a
+    // basis swap is still the difference of two lagged swaps with the same fixed leg.
+    const InterpolatedCurve projection(kAsOf, {1.0}, {0.05}, InterpolationMethod::FlatForward);
+    const auto swap = [&](const YieldCurve& index, int float_frequency) {
+        return swap_rate(index, curve, s, Date(2028, 11, 19), 4, DayCount::Act360, float_frequency,
+                         weekends, BusinessDayConvention::ModifiedFollowing, 2);
+    };
+    CHECK(basis_spread(projection, curve, curve, s, Date(2028, 11, 19), 4, 2, DayCount::Act360,
+                       weekends, BusinessDayConvention::ModifiedFollowing,
+                       2) == doctest::Approx(swap(projection, 2) - swap(curve, 4)).epsilon(1e-14));
+}
+
+TEST_CASE("bootstrap: lagged curves reprice and match QuantLib") {
+    // Reference: QuantLib 1.44 PiecewiseLogLinearDiscount (flat-forward), the SOFR curve from
+    // DepositRateHelper and OISRateHelper(2, tenor, rate, SOFR, no discount curve, no telescopic
+    // value dates, paymentLag = 2), and the 3M curve on it from DepositRateHelper and
+    // OvernightIborBasisSwapRateHelper(..., paymentLag = 2) as in "basis curves match QuantLib".
+    // Pillars and off-pillar dates agree to 4.7e-13.
+    const Calendar us = sofr_conventions().calendar;
+    const double tol = 1e-10;
+    for (const auto method : kAllMethods) {
+        CAPTURE(to_string(method));
+        const BootstrapResult r =
+            bootstrap(kAsOf,
+                      load_quotes(std::string(FIT_EXAMPLES_DIR) + "/usd_sofr.csv", kAsOf,
+                                  lagged_conventions()),
+                      us, {method});
+        CHECK(r.max_error < 1e-12);
+    }
+    const BootstrapResult sofr = bootstrap(
+        kAsOf,
+        load_quotes(std::string(FIT_EXAMPLES_DIR) + "/usd_sofr.csv", kAsOf, lagged_conventions()),
+        us);
+    CHECK(sofr.quotes.back().pillar == Date(2056, 11, 22));
+    CHECK(sofr.curve->discount(Date(2027, 11, 23)) == doctest::Approx(0.960774624459).epsilon(tol));
+    CHECK(sofr.curve->discount(Date(2028, 11, 22)) == doctest::Approx(0.927754842753).epsilon(tol));
+    CHECK(sofr.curve->discount(Date(2036, 11, 21)) == doctest::Approx(0.674310956363).epsilon(tol));
+    CHECK(sofr.curve->discount(Date(2056, 11, 22)) == doctest::Approx(0.303019934541).epsilon(tol));
+    CHECK(sofr.curve->discount(Date(2027, 8, 3)) == doctest::Approx(0.971869122130).epsilon(tol));
+    CHECK(sofr.curve->discount(Date(2041, 6, 30)) == doctest::Approx(0.549140446097).epsilon(tol));
+    BootstrapOptions options;
+    options.discount = sofr.curve;
+    const BootstrapResult basis =
+        bootstrap(kAsOf,
+                  load_quotes(std::string(FIT_EXAMPLES_DIR) + "/usd_term_sofr_3m_basis.csv", kAsOf,
+                              lagged_conventions()),
+                  us, options);
+    CHECK(basis.max_error < 1e-12);
+    CHECK(basis.curve->discount(Date(2027, 11, 23)) ==
+          doctest::Approx(0.960187844668).epsilon(tol));
+    CHECK(basis.curve->discount(Date(2036, 11, 21)) ==
+          doctest::Approx(0.668965387433).epsilon(tol));
+    CHECK(basis.curve->discount(Date(2056, 11, 22)) ==
+          doctest::Approx(0.295884173094).epsilon(tol));
+    CHECK(basis.curve->discount(Date(2030, 1, 15)) == doctest::Approx(0.888299994940).epsilon(tol));
+}
+
 TEST_CASE("bootstrap: a single swap reprices and matches the closed form") {
     // One annual-pay 1Y swap: r = (1 - DF) / (tau * DF)  =>  DF = 1 / (1 + r * tau).
     const Quote q = make_quote(kAsOf, QuoteType::Swap, "1Y", 0.04, {});

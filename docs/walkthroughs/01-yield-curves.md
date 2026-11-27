@@ -376,6 +376,46 @@ Monday the 20th and accrues for 367 days. Calendars available are `none`,
 `weekends` (default) and `us`; `--holidays FILE` adds dates of your own (one ISO date per
 line) to any of them.
 
+USD SOFR swaps also pay two business days after each period ends. `--payment-lag 2` models
+that: accrual is unchanged, but each payment is discounted from two business days later, and
+each swap's pillar moves to its last payment date:
+
+```console
+$ for l in 0 2; do echo "--- payment lag $l"; fit curve build --curve examples/data/usd_sofr.csv --asof 2026-11-17 --spot-lag 2 --calendar us --payment-lag $l --format csv | grep -E "^(tenor,|(1Y|2Y|10Y|30Y),)" | cut -d, -f1,3,6,7; done
+--- payment lag 0
+tenor,pillar,zero_cc_pct,discount
+1Y,2027-11-19,3.93895403204,0.961168667026
+2Y,2028-11-20,3.71940190822,0.927933095786
+10Y,2036-11-19,3.93289452142,0.674469916971
+30Y,2056-11-20,3.97520922728,0.303079304576
+--- payment lag 2
+tenor,pillar,zero_cc_pct,discount
+1Y,2027-11-23,3.93682697712,0.960774624459
+2Y,2028-11-22,3.71882229556,0.927754842753
+10Y,2036-11-21,3.93309622447,0.674310956363
+30Y,2056-11-22,3.97513627703,0.303019934541
+```
+
+Read at the same dates, the two curves differ by well under 0.1bp, because both legs pay late
+by the same two days:
+
+```console
+$ for l in 0 2; do echo "--- --payment-lag $l"; fit curve query --curve examples/data/usd_sofr.csv --asof 2026-11-17 --spot-lag 2 --calendar us --payment-lag $l --tenors 2Y,10Y,30Y --format csv | cut -d, -f1,4; done
+--- --payment-lag 0
+tenor,zero_cc_pct
+2Y,3.72030294293
+10Y,3.93270989162
+30Y,3.97530425538
+--- --payment-lag 2
+tenor,zero_cc_pct
+2Y,3.72033794755
+10Y,3.93272669986
+30Y,3.97529481506
+```
+
+The lag applies to `swap`, `irs` and `basis` quotes only. A curve set can give each curve its
+own `payment_lag`, and a quotes file can set one per row.
+
 ### Futures at the short end
 
 The short end of an OIS curve is often built from futures rather than deposits.

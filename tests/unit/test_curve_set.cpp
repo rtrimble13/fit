@@ -198,6 +198,15 @@ TEST_CASE("curve set: rows override the defaults and headers are checked") {
     CHECK_THROWS_AS(load_curve_set(misspelt.path, kAsOf, {}), Error);
     const TempFile missing("name,quotes\na," + kData + "/no_such_file.csv\n");
     CHECK_THROWS_AS(load_curve_set(missing.path, kAsOf, {}), Error);
+    // A row's payment_lag reaches its swap quotes; others keep the default.
+    const TempFile paid("name,quotes,spot_lag,payment_lag\na," + kData + "/usd_sofr.csv,2,2\nb," +
+                        kData + "/usd_sofr.csv,2,\n");
+    CurveSetDefaults lag_defaults;
+    lag_defaults.payment_lag = 1;
+    const std::vector<CurveSpec> paid_specs = load_curve_set(paid.path, kAsOf, lag_defaults);
+    CHECK(paid_specs[0].quotes.back().payment_lag == 2);
+    CHECK(paid_specs[1].quotes.back().payment_lag == 1);
+    CHECK(paid_specs[0].quotes.front().payment_lag == 0); // a deposit
     const TempFile lag("name,quotes,spot_lag\na," + kData + "/usd_treasury.csv,-1\n");
     const std::string message = lag.path + ":2: spot_lag must be non-negative";
     CHECK_THROWS_WITH(load_curve_set(lag.path, kAsOf, {}), message.c_str());

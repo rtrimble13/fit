@@ -70,7 +70,7 @@ $ cmake --preset release
 $ cmake --build --preset release
 $ ctest --preset release
 $ build/release/fit --version
-fit 0.4.0
+fit 0.5.0
 ```
 
 Install to a prefix (optional):
@@ -232,7 +232,7 @@ Option groups shared across commands:
 
 | Group | Options |
 |-------|---------|
-| Curve | `--curve FILE`, or `--discount-curve FILE --projection-curve FILE`, or `--curve-set FILE`; `--curve-name NAME` (not on `curve build`); `--asof DATE` `--interp flat-forward\|linear-zero\|cubic-zero\|monotone-cubic\|monotone-convex` `--extrapolation flat-forward\|flat-zero` `--calendar none\|weekends\|us` `--holidays FILE` `--spot-lag DAYS` |
+| Curve | `--curve FILE`, or `--discount-curve FILE --projection-curve FILE`, or `--curve-set FILE`; `--curve-name NAME` (not on `curve build`); `--asof DATE` `--interp flat-forward\|linear-zero\|cubic-zero\|monotone-cubic\|monotone-convex` `--extrapolation flat-forward\|flat-zero` `--calendar none\|weekends\|us` `--holidays FILE` `--spot-lag DAYS` `--payment-lag DAYS` |
 | Bond | `--maturity DATE` `--coupon PCT` `--frequency 1\|2\|4\|12` `--daycount DC` `--issue DATE` `--settle DATE` `--settle-days N` `--no-eom` |
 | Mark | one of `--price PX` (clean), `--yield PCT`, `--zspread BP`; none means "on the curve, no spread" |
 | Risk | `--key-tenors LIST` `--bump-bp BP` |
@@ -265,6 +265,7 @@ par,10Y,4.25
 | `spread_bp` | `basis` only | the spread in bp paid on the reference leg: this curve's index = reference index + spread |
 | `daycount`, `frequency`, `settle_days` | no | override the quote type's conventions; `frequency` is the fixed leg of a swap and the reference leg of a basis swap (default 4) |
 | `float_frequency` | no | `irs` and `basis` only: periods a year of the leg paying this curve's index (default 4, a 3M rate) |
+| `payment_lag` | no | `swap`, `irs` and `basis` only: business days from each period's end to its payment, overriding `--payment-lag` (default 0; USD SOFR swaps pay after 2) |
 
 With `--discount-curve` and `--projection-curve`, the projection file's swaps are priced with
 floating legs on the projection curve and all cash flows discounted on the discount curve.
@@ -288,7 +289,7 @@ treasury,usd_treasury.csv,,,weekends,0
 | `quotes` | yes | quotes file, relative to the set file |
 | `discount` | no | the curve that discounts it; empty for a curve that discounts itself |
 | `reference` | no | the curve whose index the other leg of this curve's `basis` quotes pays; empty for the discount curve |
-| `interp`, `extrapolation`, `calendar`, `spot_lag` | no | override the command line for this curve |
+| `interp`, `extrapolation`, `calendar`, `spot_lag`, `payment_lag` | no | override the command line for this curve |
 
 `--curve-name` picks the curve a command uses; bonds discount on that curve's discount curve.
 `fit curve build` reports every curve. With `--curve` the curve is named `curve`, and with the
@@ -387,7 +388,7 @@ fit is pre-1.0. The main things it does not do, each scheduled in the
 - **Instruments:** fixed-rate bullet and zero-coupon bonds only. No floaters, callables,
   amortisers, inflation-linked bonds or bills on a discount basis.
 - **Curves:** a projection curve is built after its discount and reference curves, not
-  jointly with them; no payment lags, no futures convexity model, no parametric fits.
+  jointly with them; no futures convexity model, no parametric fits.
   Extrapolation beyond the last pillar is flat (forward or zero rate), with no ultimate
   forward rate.
 - **Yields and spreads:** street-convention yield and z-spread only; no G-spread, asset-swap
